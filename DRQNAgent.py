@@ -10,9 +10,11 @@ class NetworkLSTM(nn.Module):
 
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        self.hid = nn.Linear(input_dim, 64)
-        self.lstm = nn.LSTMCell(64, 64)
-        self.logits = nn.Linear(64, output_dim)
+        self.rnn_hidden_size = 64
+        self.rnn_input_size = 72
+        self.hid = nn.Linear(input_dim, self.rnn_input_size)
+        self.lstm = nn.LSTMCell(self.rnn_input_size, self.rnn_hidden_size)
+        self.logits = nn.Linear(self.rnn_hidden_size, output_dim)
         self.relu = nn.ReLU()
 
     def forward(self, prev_state, obs_state):
@@ -26,7 +28,7 @@ class NetworkLSTM(nn.Module):
         return (h_new, c_new), logits
 
     def get_initial_state(self, batch_size):
-        return torch.zeros((batch_size, 64)), torch.zeros((batch_size, 64))
+        return torch.zeros((batch_size, self.rnn_hidden_size)), torch.zeros((batch_size, self.rnn_hidden_size))
 
     def step(self, prev_state, obs_t):
         (h, c), l = self.forward(prev_state, obs_t)
@@ -102,7 +104,7 @@ def get_session(agent, env, batch_size=1, train_agent=False):
 
     total_reward = 0
     for _ in range(1000):
-        new_memories, action = agent.get_action(prev_memories, state, train=train_agent)
+        new_memories, action = agent.get_action(prev_memories, [state], train=train_agent)
         next_state, reward, done, _ = env.step(action)
         if train_agent:
             agent.fit_DRQN(state, action, reward, done, next_state)
