@@ -1,41 +1,11 @@
-from time import time, sleep
+from time import time
 import numpy as np
 import torch
 import gym
 import matplotlib.pyplot as plt
-from agent import DQNAgent
+import DRQNAgent
 
 fig = plt.figure(figsize=(12, 7))
-
-
-def get_session(agent, env, train_agent=False):
-    state = env.reset()
-    total_reward = 0
-    for _ in range(1000):
-        action = agent.get_action(state, train=train_agent)
-        next_state, reward, done, _ = env.step(action)
-        if train_agent:
-            agent.fit_DQN(state, action, reward, done, next_state)
-        state = next_state
-        total_reward += reward
-
-        if done:
-            break
-
-    return total_reward
-
-
-def show_simulation(env, agent):
-    state = env.reset()
-    for t in range(1000):
-        action = agent.get_action(state)
-        next_state, reward, done, _ = env.step(action)
-        env.render()
-        sleep(0.02)
-        state = next_state
-        if done:
-            break
-    env.close()
 
 
 def show_plot(total_rewards):
@@ -71,7 +41,9 @@ def train(hyper_parameters, device):
     env = gym.make("CartPole-v1")
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DQNAgent(state_dim, action_n, hyper_parameters, device)
+    agent = DRQNAgent.DRQNAgent(state_dim, action_n, hyper_parameters, device)
+
+    DRQNAgent.show_simulation(env, agent)
 
     total_rewards = []
     total_test_rewards = []
@@ -82,11 +54,11 @@ def train(hyper_parameters, device):
     t = time()
 
     for epoch in range(epoch_n):
-        rewards = [get_session(agent, env, train_agent=True) for _ in range(session_n)]
+        rewards = [DRQNAgent.get_session(agent, env, train_agent=True) for _ in range(session_n)]
         total_rewards += rewards
         mean_reward = np.mean(rewards)
 
-        test_rewards = [get_session(agent, env) for _ in range(test_n)]
+        test_rewards = [DRQNAgent.get_session(agent, env) for _ in range(test_n)]
         total_test_rewards += test_rewards
         test_mean_reward = np.mean(test_rewards)
         total_test_mean.append(test_mean_reward)
@@ -102,7 +74,7 @@ def train(hyper_parameters, device):
 
 
 def main():
-    use_cuda = torch.cuda.is_available()
+    use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
     print('Used', device)
 

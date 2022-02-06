@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import random
 from collections import deque
+from time import sleep
 
 
 class Network(nn.Module):
@@ -78,3 +79,33 @@ class DQNAgent(nn.Module):
             self._optimizer.zero_grad()
 
             self.epsilon = max(self.min_epsilon, self.epsilon * self.mul_epsilon)
+
+
+def get_session(agent, env, train_agent=False):
+    state = env.reset()
+    total_reward = 0
+    for _ in range(1000):
+        action = agent.get_action(state, train=train_agent)
+        next_state, reward, done, _ = env.step(action)
+        if train_agent:
+            agent.fit_DQN(state, action, reward, done, next_state)
+        state = next_state
+        total_reward += reward
+
+        if done:
+            break
+
+    return total_reward
+
+
+def show_simulation(env, agent):
+    state = env.reset()
+    for t in range(1000):
+        action = agent.get_action(state)
+        next_state, reward, done, _ = env.step(action)
+        env.render()
+        sleep(0.02)
+        state = next_state
+        if done:
+            break
+    env.close()
