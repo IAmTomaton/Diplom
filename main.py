@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import gym
 import matplotlib.pyplot as plt
-import DRQNAgent
+from DRQNAgent import DRQNAgent, show_simulation, get_session
 
 fig = plt.figure(figsize=(12, 7))
 
@@ -41,9 +41,9 @@ def train(hyper_parameters, device):
     env = gym.make("CartPole-v1")
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DRQNAgent.DRQNAgent(state_dim, action_n, hyper_parameters, device)
+    agent = DRQNAgent(state_dim, action_n, hyper_parameters, device)
 
-    DRQNAgent.show_simulation(env, agent)
+    show_simulation(env, agent)
 
     total_rewards = []
     total_test_rewards = []
@@ -54,11 +54,11 @@ def train(hyper_parameters, device):
     t = time()
 
     for epoch in range(epoch_n):
-        rewards = [DRQNAgent.get_session(agent, env, train_agent=True) for _ in range(session_n)]
+        rewards = [get_session(agent, env, train_agent=True) for _ in range(session_n)]
         total_rewards += rewards
         mean_reward = np.mean(rewards)
 
-        test_rewards = [DRQNAgent.get_session(agent, env) for _ in range(test_n)]
+        test_rewards = [get_session(agent, env) for _ in range(test_n)]
         total_test_rewards += test_rewards
         test_mean_reward = np.mean(test_rewards)
         total_test_mean.append(test_mean_reward)
