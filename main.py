@@ -43,8 +43,6 @@ def train(hyper_parameters, device):
     action_n = env.action_space.n
     agent = DRQNAgent(state_dim, action_n, hyper_parameters, device)
 
-    show_simulation(env, agent)
-
     total_rewards = []
     total_test_rewards = []
     total_test_mean = [0]
@@ -63,7 +61,7 @@ def train(hyper_parameters, device):
         test_mean_reward = np.mean(test_rewards)
         total_test_mean.append(test_mean_reward)
 
-        save_plot(total_rewards, total_test_rewards, total_test_mean, 'plots\\' + 'plot' + '.png')
+        save_plot(total_rewards, total_test_rewards, total_test_mean, 'plots\\' + 'plot_lstm' + '.png')
         text = 'Epoch: ' + str(epoch + 1) + ' Mean reward: ' + str(mean_reward) + \
                ' Time: ' + str(round(time() - t, 2)) + ' Ep: ' + str(round(agent.epsilon, 5)) + \
                ' Test: ' + str(test_mean_reward)
