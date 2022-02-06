@@ -79,9 +79,9 @@ class DRQNAgent(nn.Module):
 
             states, actions, rewards, danes, next_states = list(zip(*batch))
             states = torch.FloatTensor(np.array(states))
-            q_values = self._q(states)
+            lstm_states, q_values = self._q(self.get_initial_state(self.batch_size), states)
             next_states = torch.FloatTensor(np.array(next_states))
-            next_q_values = self._q(next_states)
+            next_lstm_states, next_q_values = self._q(lstm_states, next_states)
             targets = q_values.clone()
             for i in range(self.batch_size):
                 targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
