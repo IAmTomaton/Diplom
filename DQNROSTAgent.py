@@ -8,6 +8,7 @@ from time import time
 from EpochLog import EpochLog
 from TrainLog import TrainLog
 from log import save_log
+from other.DubinsCar_Discrete import DubinsCar
 from utils import print_log
 
 
@@ -108,7 +109,7 @@ class DQNROSTAgent(nn.Module):
 
                 target = q_value.clone()
                 target[action] = reward + self.gamma * (1 - done) * max(next_q_value)
-                loss = torch.mean((target.detach() - q_value) ** 2)
+                loss += torch.mean((target.detach() - q_value) ** 2)
 
         loss.backward()
         self._optimizer.step()
@@ -139,7 +140,7 @@ def get_session(agent, env, train_agent=False):
     return total_reward
 
 
-def train(env, agent, log_folder='logs', name='DRQNROST', epoch_n=1000, episode_n=200, test_n=100):
+def train(env, agent, log_folder='logs', name='DQNROST', epoch_n=1000, episode_n=200, test_n=100):
     train_info = TrainLog(name, agent.hyper_parameters)
 
     for epoch in range(epoch_n):
@@ -162,7 +163,10 @@ def train(env, agent, log_folder='logs', name='DRQNROST', epoch_n=1000, episode_
 
 
 def make_env():
-    return gym.make("CartPole-v1")
+    # env = gym.make("CartPole-v1")
+    env = DubinsCar()
+    # env = SimpleControlProblem_Discrete()
+    return env
 
 
 def main():
@@ -171,14 +175,14 @@ def main():
     env = make_env()
     print('Used', device)
 
-    hyper_parameters = {'gamma': 0.95, 'batch_size': 64, 'learning_rate': 1e-4,
-                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'episode_len': 2, 'st_coefficient': 1e-3}
+    hyper_parameters = {'gamma': 0.95, 'batch_size': 32, 'learning_rate': 1e-4,
+                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9996, 'episode_len': 2, 'st_coefficient': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
     agent = DQNROSTAgent(state_dim, action_n, make_env, hyper_parameters, device)
 
-    train(env, agent)
+    train(env, agent, 'logs_DubinsCar')
 
 
 if __name__ == '__main__':
