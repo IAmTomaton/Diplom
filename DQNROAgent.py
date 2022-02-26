@@ -3,14 +3,11 @@ import gym
 import numpy as np
 import torch
 from torch import nn
-import random
-from collections import deque
-from time import sleep, time
+from time import time
 from EpochLog import EpochLog
 from TrainLog import TrainLog
 from log import save_log
 from other.DubinsCar_Discrete import DubinsCar
-from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from utils import print_log
 
 
@@ -32,9 +29,9 @@ class Network(nn.Module):
         return output
 
 
-class DQNAgent(nn.Module):
+class DQNROAgent(nn.Module):
 
-    def __init__(self, state_dim, action_n, hyper_parameters, device):
+    def __init__(self, state_dim, action_n, make_env, hyper_parameters, device):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
@@ -44,49 +41,77 @@ class DQNAgent(nn.Module):
         self.epsilon = 1
         self.min_epsilon = hyper_parameters['min_epsilon']
         self.mul_epsilon = hyper_parameters['mul_epsilon']
-        self.memory_size = hyper_parameters['memory_size']
         self.batch_size = hyper_parameters['batch_size']
+        self.episode_len = hyper_parameters['episode_len']
         self.learning_rate = hyper_parameters['learning_rate']
         self.hyper_parameters = hyper_parameters
 
-        self._memory = deque()
         self._q = Network(self._state_dim, self._action_n).to(device)
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
+        self._envs = [make_env() for _ in range(self.batch_size)]
+        self._env_states = [env.reset() for env in self._envs]
+        self._rewards = [0 for _ in range(self.batch_size)]
+        self._ended_rewards = []
+
     def get_action(self, state, train=False):
-        state = torch.FloatTensor(np.array(state)).to(device=self._device, non_blocking=True)
+        state = torch.FloatTensor(np.array(state))
         argmax_action = torch.argmax(self._q(state))
+
         if not train:
             return int(argmax_action)
+
         probs = np.ones(self._action_n) * self.epsilon / self._action_n
         probs[argmax_action] += 1 - self.epsilon
         actions = np.arange(self._action_n)
         return np.random.choice(actions, p=probs)
 
-    def fit_DQN(self, state, action, reward, done, next_state):
-        self._memory.append([state, action, reward, done, next_state])
-        if len(self._memory) > self.memory_size:
-            self._memory.popleft()
+    def make_step(self, i):
+        state = self._env_states[i]
+        env = self._envs[i]
 
-        if len(self._memory) > self.batch_size:
-            batch = random.sample(self._memory, self.batch_size)
+        action = self.get_action([state], train=True)
+        next_state, reward, done, _ = env.step(action)
+        self._rewards[i] += reward
 
-            states, actions, rewards, danes, next_states = list(zip(*batch))
-            states = torch.FloatTensor(np.array(states)).to(device=self._device, non_blocking=True)
-            q_values = self._q(states)
-            next_states = torch.FloatTensor(np.array(next_states)).to(device=self._device, non_blocking=True)
-            next_q_values = self._q(next_states)
-            targets = q_values.clone()
+        if done:
+            next_state = env.reset()
+            self._ended_rewards.append(self._rewards[i])
+            self._rewards[i] = 0
+
+        self._env_states[i] = next_state
+
+        return state, action, reward, done, next_state
+
+    def get_batch(self):
+        self._ended_rewards = []
+        for _ in range(self.episode_len):
+            yield [self.make_step(i) for i in range(self.batch_size)]
+
+    def fit_agent(self):
+        loss = 0
+        batch = list(self.get_batch())
+
+        for SARDSes in batch:
             for i in range(self.batch_size):
-                targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
+                state, action, reward, done, next_state = SARDSes[i]
 
-            loss = torch.mean((targets.detach() - q_values) ** 2)
+                state = torch.FloatTensor(np.array(state))
+                q_value = self._q(state)
+                next_state = torch.FloatTensor(np.array(next_state))
+                next_q_value = self._q(next_state)
 
-            loss.backward()
-            self._optimizer.step()
-            self._optimizer.zero_grad()
+                target = q_value.clone()
+                target[action] = reward + self.gamma * (1 - done) * max(next_q_value)
+                loss += torch.mean((target.detach() - q_value) ** 2)
 
-            self.epsilon = max(self.min_epsilon, self.epsilon * self.mul_epsilon)
+        loss.backward()
+        self._optimizer.step()
+        self._optimizer.zero_grad()
+
+        self.epsilon = max(self.min_epsilon, self.epsilon * self.mul_epsilon)
+
+        return self._ended_rewards, int(loss)
 
 
 def get_session(agent, env, train_agent=False):
@@ -106,54 +131,52 @@ def get_session(agent, env, train_agent=False):
     return total_reward
 
 
-def show_simulation(env, agent):
-    state = env.reset()
-    for t in range(1000):
-        action = agent.get_action(state)
-        next_state, reward, done, _ = env.step(action)
-        env.render()
-        sleep(0.02)
-        state = next_state
-        if done:
-            break
-    env.close()
-
-
-def train(env, agent, log_folder='logs', name='DQN', epoch_n=100, session_n=100, test_n=100):
+def train(env, agent, log_folder='logs', name='DQNRO', epoch_n=1000, episode_n=200, test_n=100):
     train_info = TrainLog(name, agent.hyper_parameters)
 
     for epoch in range(epoch_n):
         t = time()
-        rewards = [get_session(agent, env, train_agent=True) for _ in range(session_n)]
-        mean_reward = np.mean(rewards)
+        epoch_rewards = []
+        epoch_loss = []
+        for _ in range(episode_n):
+            rewards, loss = agent.fit_agent()
+            epoch_loss.append(loss)
+            epoch_rewards += rewards
 
+        print(np.mean(epoch_loss))
+
+        mean_reward = np.mean(epoch_rewards)
         test_rewards = [get_session(agent, env) for _ in range(test_n)]
         test_mean_reward = np.mean(test_rewards)
         std_dev = math.sqrt(np.mean([(r - test_mean_reward) ** 2 for r in test_rewards]))
 
-        epoch_info = EpochLog(time() - t, mean_reward, rewards, test_mean_reward, test_rewards)
+        epoch_info = EpochLog(time() - t, mean_reward, epoch_rewards, test_mean_reward, test_rewards)
         train_info.add_epoch(epoch_info)
 
         save_log(train_info, log_folder + '\\' + train_info.name + '_log' + '.json')
         print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
 
 
+def make_env():
+    env = gym.make("CartPole-v1")
+    # env = DubinsCar()
+    return env
+
+
 def main():
     use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
-    env = gym.make("CartPole-v1")
-    # env = SimpleControlProblem_Discrete()
-    # env = DubinsCar()
+    env = make_env()
     print('Used', device)
 
-    hyper_parameters = {'memory_size': 30000, 'gamma': 0.95, 'batch_size': 32, 'learning_rate': 1e-4,
-                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999}
+    hyper_parameters = {'gamma': 0.95, 'batch_size': 16, 'learning_rate': 1e-4,
+                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'episode_len': 4}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DQNAgent(state_dim, action_n, hyper_parameters, device)
+    agent = DQNROAgent(state_dim, action_n, make_env, hyper_parameters, device)
 
-    train(env, agent, 'logs', 'DQN')
+    train(env, agent, 'logs')
 
 
 if __name__ == '__main__':
