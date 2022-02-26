@@ -11,19 +11,27 @@ class LogList(tk.Frame):
     def __init__(self, master, folders):
         super().__init__(master)
 
-        self._folders = folders
-
+        self._folders = []
         self._folder_frames = []
-        for i in range(len(folders)):
-            folder = Folder(self, folders[i][0], folders[i][1])
-            self._folder_frames.append(folder)
-            folder.grid(row=i, column=0, sticky="w")
+        self.update_folders(folders)
 
     def get_selected_paths(self):
         paths = []
         for folder in self._folder_frames:
             paths += folder.get_selected_paths()
         return paths
+
+    def update_folders(self, folders):
+        self._folders = folders
+
+        for frame in self._folder_frames:
+            frame.destroy()
+
+        self._folder_frames = []
+        for i in range(len(folders)):
+            folder = Folder(self, folders[i][0], folders[i][1])
+            self._folder_frames.append(folder)
+            folder.grid(row=i, column=0, sticky="we")
 
 
 class Folder(tk.Frame):
@@ -113,6 +121,11 @@ def save(fig, path):
     fig.savefig(path)
 
 
+def update_folders(log_list, folders):
+    files = [(folder, os.listdir(folder)) for folder in folders]
+    log_list.update_folders(files)
+
+
 def main():
     folders = ['logs', 'logs_DubinsCar', 'logs_SimpleControlProblem_Discrete']
     files = [(folder, os.listdir(folder)) for folder in folders]
@@ -124,9 +137,11 @@ def main():
 
     control = tk.Frame(root)
     log_list = LogList(control, files)
-    log_list.pack()
+    log_list.pack(fill='both')
     draw_button = tk.Button(control, text='Draw', command=lambda: draw(fig, canvas, log_list))
     draw_button.pack()
+    save_button = tk.Button(control, text='Update files', command=lambda: update_folders(log_list, folders))
+    save_button.pack()
     save_button = tk.Button(control, text='Save', command=lambda: save(fig, 'plots/plot.png'))
     save_button.pack()
 
