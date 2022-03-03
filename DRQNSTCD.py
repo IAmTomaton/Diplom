@@ -115,8 +115,8 @@ class DRQNSTCDAgent(nn.Module):
             loss = torch.mean((targets.detach() - q_values) ** 2)
 
             loss.backward()
-            self._optimizer.zero_grad()
             self._optimizer.step()
+            self._optimizer.zero_grad()
 
             for target_param, param in zip(self._q_target.parameters(), self._q.parameters()):
                 target_param.data.copy_((1 - self.st_coef) * target_param.data + self.st_coef * param.data)
