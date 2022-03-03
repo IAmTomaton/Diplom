@@ -43,7 +43,7 @@ class NetworkLSTM(nn.Module):
         return (h.detach(), c.detach()), l.detach()
 
 
-class DRQNSHAgent(nn.Module):
+class DRQNSTAgent(nn.Module):
 
     def __init__(self, state_dim, action_n, hyper_parameters, device):
         super().__init__()
@@ -177,8 +177,8 @@ def main():
     use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
     # env = gym.make("CartPole-v1")
-    env = DubinsCar()
-    # env = SimpleControlProblem_Discrete()
+    # env = DubinsCar()
+    env = SimpleControlProblem_Discrete()
     print('Used', device)
 
     hyper_parameters = {'memory_size': 30000, 'gamma': 0.95, 'batch_size': 64, 'learning_rate': 1e-4,
@@ -186,9 +186,9 @@ def main():
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DRQNSHAgent(state_dim, action_n, hyper_parameters, device)
+    agent = DRQNSTAgent(state_dim, action_n, hyper_parameters, device)
 
-    train(env, agent, 'logs_DubinsCar')
+    train(env, agent, 'logs_SimpleControlProblem_Discrete')
 
 
 if __name__ == '__main__':

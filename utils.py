@@ -35,7 +35,7 @@ def save_plot(total_rewards, total_test_rewards, total_test_mean, total_test_std
 
 
 def print_log(epoch, mean_reward, time, epsilon, test_mean_reward, std_dev):
-    text = 'Epoch: ' + str(epoch) + ' Mean reward: ' + str(round(mean_reward, 2)) + \
+    text = 'Epoch: ' + str(epoch) + ' Mean: ' + str(round(mean_reward, 2)) + \
            ' Time: ' + str(round(time, 2)) + ' Ep: ' + str(round(epsilon, 5)) + \
            ' Test: ' + str(round(test_mean_reward, 2)) + ' Std Dev: ' + str(round(std_dev, 2))
 
