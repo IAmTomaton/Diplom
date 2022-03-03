@@ -71,12 +71,12 @@ class DRQNSTCDAgent(nn.Module):
         memories = self.get_initial_state(1)
 
         for state in states:
-            state = torch.FloatTensor(np.array([state]))
+            state_tensor = torch.FloatTensor(np.array([state]))
 
             if train:
-                memories, readouts = self._q.step(memories, state)
+                memories, readouts = self._q.step(memories, state_tensor)
             else:
-                memories, readouts = self._q_target.step(memories, state)
+                memories, readouts = self._q_target.step(memories, state_tensor)
 
         argmax_action = torch.argmax(readouts)
 
@@ -94,7 +94,7 @@ class DRQNSTCDAgent(nn.Module):
         if len(self._memory) > self.memory_size:
             self._memory.pop(0)
 
-        if len(self._memory) > self.batch_size:
+        if len(self._memory) - self.states_count > self.batch_size:
             batch = self._get_batch()
             memories = self.get_initial_state(self.batch_size)
             next_memories = self.get_initial_state(self.batch_size)
@@ -102,11 +102,11 @@ class DRQNSTCDAgent(nn.Module):
             for k in range(self.states_count):
                 states, actions, rewards, danes, next_states = list(zip(*batch[k]))
 
-                states = torch.FloatTensor(np.array(states))
-                memories, q_values = self._q(memories, states)
+                states_tensor = torch.FloatTensor(np.array(states))
+                memories, q_values = self._q(memories, states_tensor)
 
-                next_states = torch.FloatTensor(np.array(next_states))
-                next_memories, next_q_values = self._q_target(next_memories, next_states)
+                next_states_tensor = torch.FloatTensor(np.array(next_states))
+                next_memories, next_q_values = self._q_target(next_memories, next_states_tensor)
 
             targets = q_values.clone()
             for i in range(self.batch_size):
@@ -127,11 +127,13 @@ class DRQNSTCDAgent(nn.Module):
         return self._q.get_initial_state(batch_size)
 
     def _get_batch(self):
-        batch_indexes = random.sample(range(len(self._memory)), self.batch_size)
+        batch_indexes = random.sample(range(self.states_count - 1, len(self._memory)), self.batch_size)
         batch = [[self._memory[j] for j in batch_indexes]]
+        danes = [done for _, _, _, done, _ in batch[0]]
         for i in range(1, self.states_count):
-            batch.append([self._memory[j - i] if j - i >= 0 and not self._memory[j - i][3] else batch[i - 1][index]
+            batch.append([self._memory[j - i] if j - i >= 0 and not danes[index] else batch[i - 1][index]
                           for index, j in enumerate(batch_indexes)])
+            danes = [danes[i] or batch[-1][i][3] for i in range(self.batch_size)]
         batch.reverse()
         return batch
 
@@ -148,6 +150,7 @@ def get_session(agent, env, train_agent=False):
             agent.fit_agent(state, action, reward, done, next_state)
         states.pop(0)
         states.append(next_state)
+        state = next_state
         total_reward += reward
 
         if done:
@@ -178,19 +181,19 @@ def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n
 def main():
     use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
-    env = gym.make("CartPole-v1")
+    # env = gym.make("CartPole-v1")
     # env = DubinsCar()
-    # env = SimpleControlProblem_Discrete()
+    env = SimpleControlProblem_Discrete()
     print('Used', device)
 
-    hyper_parameters = {'memory_size': 30000, 'gamma': 0.99, 'batch_size': 128, 'learning_rate': 1e-4,
+    hyper_parameters = {'memory_size': 30000, 'gamma': 0.95, 'batch_size': 32, 'learning_rate': 1e-4,
                         'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'states_count': 3, 'st_coef': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
     agent = DRQNSTCDAgent(state_dim, action_n, hyper_parameters, device)
 
-    train(env, agent, 'logs')
+    train(env, agent, 'logs_SimpleControlProblem_Discrete')
 
 
 if __name__ == '__main__':
