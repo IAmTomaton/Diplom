@@ -6,60 +6,93 @@ from TrainLog import TrainLog
 from log import read_log
 
 
-class LogList(tk.Frame):
+class FolderFrame(tk.Frame):
 
-    def __init__(self, master, folders):
+    def __init__(self, master, folder, fig, call_back):
         super().__init__(master)
 
-        self._folders = []
-        self._folder_frames = []
-        self.update_folders(folders)
+        self._fig = fig
+        self._canvas = FigureCanvasTkAgg(fig, self)
 
-    def get_selected_paths(self):
-        paths = []
-        for folder in self._folder_frames:
-            paths += folder.get_selected_paths()
-        return paths
-
-    def update_folders(self, folders):
-        self._folders = folders
-
-        for frame in self._folder_frames:
-            frame.destroy()
-
-        self._folder_frames = []
-        for i in range(len(folders)):
-            folder = Folder(self, folders[i][0], folders[i][1])
-            self._folder_frames.append(folder)
-            folder.grid(row=i, column=0, sticky="we")
-
-
-class Folder(tk.Frame):
-
-    def __init__(self, master, folder, files):
-        super().__init__(master)
-
-        self.config(highlightbackground="black", highlightthickness=1)
-
-        self._files = files
+        self._files = os.listdir(folder)
         self._folder = folder
 
-        self._label = tk.Label(self, text=folder)
+        self._control_frame = tk.Frame(self)
+        self._control_frame.grid(column=0, row=0, sticky="n")
+
+        self._file_frame = tk.Frame(self._control_frame)
+        self._file_frame.pack(side='top')
+
+        self._label = tk.Label(self._file_frame, text=self._folder)
         self._label.grid(row=0, column=0, sticky="w")
 
-        self._states = [tk.IntVar() for _ in files]
         self._file_buttons = []
-        for i in range(len(files)):
-            cb = tk.Checkbutton(self, variable=self._states[i], text=files[i])
-            self._file_buttons.append(cb)
-            cb.grid(row=i + 1, column=0, sticky="w")
+        self._update_file_frame()
 
-    def get_selected_paths(self):
+        self._buttons_frame = tk.Frame(self._control_frame)
+        self._buttons_frame.pack(side='top', fill='x', padx=1, pady=1)
+
+        draw_button = tk.Button(self._buttons_frame, text='Draw',
+                                command=lambda: draw(fig, self._canvas, self._get_selected_paths()))
+        draw_button.pack(fill='x', padx=1, pady=1)
+        update_button = tk.Button(self._buttons_frame, text='Update files', command=lambda: self._update_files())
+        update_button.pack(fill='x', padx=1, pady=1)
+        save_button = tk.Button(self._buttons_frame, text='Save', command=lambda: save(None, 'plots/plot.png'))
+        save_button.pack(fill='x', padx=1, pady=1)
+        back_button = tk.Button(self._buttons_frame, text='Back', command=call_back)
+        back_button.pack(fill='x', padx=1, pady=1)
+
+        self._canvas_widget = self._canvas.get_tk_widget()
+        self._canvas_widget .grid(column=1, row=0)
+
+    def _get_selected_paths(self):
         paths = []
         for i in range(len(self._files)):
             if self._states[i].get():
                 paths.append(self._folder + '\\' + self._files[i])
         return paths
+
+    def _update_files(self):
+        self._files = os.listdir(self._folder)
+        self._update_file_frame()
+
+    def _update_file_frame(self):
+        for button in self._file_buttons:
+            button.destroy()
+
+        self._states = [tk.IntVar() for _ in self._files]
+        for i in range(len(self._files)):
+            cb = tk.Checkbutton(self._file_frame, variable=self._states[i], text=self._files[i])
+            self._file_buttons.append(cb)
+            cb.grid(row=i + 1, column=0, sticky="w")
+
+
+class App(tk.Frame):
+
+    def __init__(self, master, folders):
+        super().__init__(master)
+
+        self._folders = folders
+
+        self._fig = plt.figure(figsize=(16, 8))
+
+        self._set_folders_list()
+
+    def _set_folders_list(self):
+        self._folders_list = tk.Frame(self)
+        for folder in self._folders:
+            button = tk.Button(self._folders_list, text=folder, command=lambda f=folder: self._open_folder(f))
+            button.pack(fill='x', padx=1, pady=1)
+        self._folders_list.pack()
+
+    def _open_folder(self, folder):
+        self._folders_list.destroy()
+        self._folder_frame = FolderFrame(self, folder, self._fig, self._back)
+        self._folder_frame.pack()
+
+    def _back(self):
+        self._folder_frame.destroy()
+        self._set_folders_list()
 
 
 def draw_graphics(fig, files):
@@ -112,8 +145,8 @@ def draw_graphics(fig, files):
     test_reward_ax.title.set_text('Test rewards')
 
 
-def draw(fig, canvas, log_list):
-    draw_graphics(fig, log_list.get_selected_paths())
+def draw(fig, canvas, files):
+    draw_graphics(fig, files)
     canvas.draw()
 
 
@@ -128,25 +161,11 @@ def update_folders(log_list, folders):
 
 def main():
     folders = ['logs', 'logs_DubinsCar', 'logs_SimpleControlProblem_Discrete']
-    files = [(folder, os.listdir(folder)) for folder in folders]
 
     root = tk.Tk()
 
-    fig = plt.figure(figsize=(16, 8))
-    canvas = FigureCanvasTkAgg(fig, root)
-
-    control = tk.Frame(root)
-    log_list = LogList(control, files)
-    log_list.pack(fill='both')
-    draw_button = tk.Button(control, text='Draw', command=lambda: draw(fig, canvas, log_list))
-    draw_button.pack()
-    save_button = tk.Button(control, text='Update files', command=lambda: update_folders(log_list, folders))
-    save_button.pack()
-    save_button = tk.Button(control, text='Save', command=lambda: save(fig, 'plots/plot.png'))
-    save_button.pack()
-
-    control.pack(side='left')
-    canvas.get_tk_widget().pack(side='left', fill=tk.BOTH, expand=1)
+    app = App(root, folders)
+    app.pack()
 
     root.mainloop()
 
