@@ -129,11 +129,9 @@ class DRQNSTCDAgent(nn.Module):
     def _get_batch(self):
         batch_indexes = random.sample(range(self.states_count - 1, len(self._memory)), self.batch_size)
         batch = [[self._memory[j] for j in batch_indexes]]
-        danes = [done for _, _, _, done, _ in batch[0]]
         for i in range(1, self.states_count):
-            batch.append([self._memory[j - i] if j - i >= 0 and not danes[index] else batch[i - 1][index]
+            batch.append([self._memory[j - i] if j - i >= 0 and not self._memory[j - i][3] else batch[i - 1][index]
                           for index, j in enumerate(batch_indexes)])
-            danes = [danes[i] or batch[-1][i][3] for i in range(self.batch_size)]
         batch.reverse()
         return batch
 
