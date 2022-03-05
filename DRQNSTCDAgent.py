@@ -6,46 +6,17 @@ import numpy as np
 import torch
 from torch import nn
 from time import time
-from TrainLog import TrainLog
-from EpochLog import EpochLog
+
+from networks import *
+from train_info.train_log import TrainLog
+from train_info.epoch_log import EpochLog
 from log import save_log
-from other.DubinsCar_Discrete import DubinsCar
-from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from utils import print_log
-
-
-class NetworkLSTM(nn.Module):
-
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        self.rnn_hidden_size = 64
-        self.rnn_input_size = 72
-        self.hid = nn.Linear(input_dim, self.rnn_input_size)
-        self.lstm = nn.LSTMCell(self.rnn_input_size, self.rnn_hidden_size)
-        self.logits = nn.Linear(self.rnn_hidden_size, output_dim)
-        self.relu = nn.ReLU()
-
-    def forward(self, prev_state, obs_state):
-        hidden = self.hid(obs_state)
-        hidden = self.relu(hidden)
-
-        h_new, c_new = self.lstm(hidden, prev_state)
-
-        logits = self.logits(h_new)
-
-        return (h_new, c_new), logits
-
-    def get_initial_state(self, batch_size):
-        return torch.zeros((batch_size, self.rnn_hidden_size)), torch.zeros((batch_size, self.rnn_hidden_size))
-
-    def step(self, prev_state, obs_t):
-        (h, c), l = self.forward(prev_state, obs_t)
-        return (h.detach(), c.detach()), l.detach()
 
 
 class DRQNSTCDAgent(nn.Module):
 
-    def __init__(self, state_dim, action_n, hyper_parameters, device):
+    def __init__(self, network, state_dim, action_n, hyper_parameters, device):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
@@ -63,7 +34,7 @@ class DRQNSTCDAgent(nn.Module):
         self.hyper_parameters = hyper_parameters
 
         self._memory = []
-        self._q = NetworkLSTM(self._state_dim, self._action_n)
+        self._q = network
         self._q_target = copy.deepcopy(self._q)
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
@@ -139,9 +110,10 @@ class DRQNSTCDAgent(nn.Module):
 def get_session(agent, env, train_agent=False):
     state = env.reset()
     states = [state] * agent.states_count
+    done = False
 
     total_reward = 0
-    for _ in range(1000):
+    while not done:
         action = agent.get_action(states, train=train_agent)
         next_state, reward, done, _ = env.step(action)
         if train_agent:
@@ -157,7 +129,7 @@ def get_session(agent, env, train_agent=False):
     return total_reward
 
 
-def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n=20, test_n=100):
+def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n=20, test_n=20):
     train_info = TrainLog(name, agent.hyper_parameters)
 
     for epoch in range(epoch_n):
@@ -172,26 +144,27 @@ def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n
         epoch_info = EpochLog(time() - t, mean_reward, rewards, test_mean_reward, test_rewards)
         train_info.add_epoch(epoch_info)
 
-        save_log(train_info, log_folder + '\\' + train_info.name + '_log' + '.json')
+        save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
 
 
 def main():
     use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
-    # env = gym.make("CartPole-v1")
+    env = gym.make("CartPole-v1")
     # env = DubinsCar()
-    env = SimpleControlProblem_Discrete()
+    # env = SimpleControlProblem_Discrete()
     print('Used', device)
 
-    hyper_parameters = {'memory_size': 30000, 'gamma': 0.95, 'batch_size': 32, 'learning_rate': 1e-4,
-                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'states_count': 3, 'st_coef': 1e-3}
+    hyper_parameters = {'memory_size': 30000, 'gamma': 0.99, 'batch_size': 32, 'learning_rate': 1e-4,
+                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'states_count': 4, 'st_coef': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DRQNSTCDAgent(state_dim, action_n, hyper_parameters, device)
+    network = NetworkD64D72LSTM64D64(state_dim, action_n)
+    agent = DRQNSTCDAgent(network, state_dim, action_n, hyper_parameters, device)
 
-    train(env, agent, 'logs_SimpleControlProblem_Discrete')
+    train(env, agent, 'logs', 'DRQNSTCD_D64D72LSTM64D64_2')
 
 
 if __name__ == '__main__':

@@ -6,35 +6,16 @@ from torch import nn
 import random
 from collections import deque
 from time import sleep, time
-from EpochLog import EpochLog
-from TrainLog import TrainLog
+from train_info.epoch_log import EpochLog
+from train_info.train_log import TrainLog
 from log import save_log
-from other.DubinsCar_Discrete import DubinsCar
-from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
+from networks.NetworkD64D64 import NetworkD64D64
 from utils import print_log
-
-
-class Network(nn.Module):
-
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        self.linear_1 = nn.Linear(input_dim, 64)
-        self.linear_2 = nn.Linear(64, 64)
-        self.linear_3 = nn.Linear(64, output_dim)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        hidden = self.linear_1(x)
-        hidden = self.relu(hidden)
-        hidden = self.linear_2(hidden)
-        hidden = self.relu(hidden)
-        output = self.linear_3(hidden)
-        return output
 
 
 class DQNAgent(nn.Module):
 
-    def __init__(self, state_dim, action_n, hyper_parameters, device):
+    def __init__(self, network, state_dim, action_n, hyper_parameters, device):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
@@ -50,7 +31,7 @@ class DQNAgent(nn.Module):
         self.hyper_parameters = hyper_parameters
 
         self._memory = deque()
-        self._q = Network(self._state_dim, self._action_n).to(device)
+        self._q = network
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
     def get_action(self, state, train=False):
@@ -134,14 +115,14 @@ def train(env, agent, log_folder='logs', name='DQN', epoch_n=100, session_n=100,
         epoch_info = EpochLog(time() - t, mean_reward, rewards, test_mean_reward, test_rewards)
         train_info.add_epoch(epoch_info)
 
-        save_log(train_info, log_folder + '\\' + train_info.name + '_log' + '.json')
+        save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
 
 
 def main():
     use_cuda = torch.cuda.is_available() and False
     device = torch.device('cuda' if use_cuda else 'cpu')
-    env = gym.make("CartPole-v1")
+    env = gym.make("CartPole-v2")
     # env = SimpleControlProblem_Discrete()
     # env = DubinsCar()
     print('Used', device)
@@ -151,9 +132,10 @@ def main():
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DQNAgent(state_dim, action_n, hyper_parameters, device)
+    network = NetworkD64D64(state_dim, action_n)
+    agent = DQNAgent(network, state_dim, action_n, hyper_parameters, device)
 
-    train(env, agent, 'logs', 'DQN')
+    train(env, agent, 'logs', 'DQN_2000')
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-from EpochLog import EpochLog
+from .epoch_log import EpochLog
 
 
 class TrainLog:

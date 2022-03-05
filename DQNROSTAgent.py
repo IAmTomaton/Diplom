@@ -5,34 +5,16 @@ import numpy as np
 import torch
 from torch import nn
 from time import time
-from EpochLog import EpochLog
-from TrainLog import TrainLog
+from train_info.epoch_log import EpochLog
+from train_info.train_log import TrainLog
 from log import save_log
-from other.DubinsCar_Discrete import DubinsCar
+from networks.NetworkD64D64 import NetworkD64D64
 from utils import print_log
-
-
-class Network(nn.Module):
-
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        self.linear_1 = nn.Linear(input_dim, 64)
-        self.linear_2 = nn.Linear(64, 64)
-        self.linear_3 = nn.Linear(64, output_dim)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        hidden = self.linear_1(x)
-        hidden = self.relu(hidden)
-        hidden = self.linear_2(hidden)
-        hidden = self.relu(hidden)
-        output = self.linear_3(hidden)
-        return output
 
 
 class DQNROSTAgent(nn.Module):
 
-    def __init__(self, state_dim, action_n, make_env, hyper_parameters, device):
+    def __init__(self, network, state_dim, action_n, make_env, hyper_parameters, device):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
@@ -48,7 +30,7 @@ class DQNROSTAgent(nn.Module):
         self.st_coefficient = hyper_parameters['st_coefficient']
         self.hyper_parameters = hyper_parameters
 
-        self._q = Network(self._state_dim, self._action_n)
+        self._q = network
         self._q_target = copy.deepcopy(self._q)
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
@@ -97,9 +79,9 @@ class DQNROSTAgent(nn.Module):
         loss = 0
         batch = list(self.get_batch())
 
-        for SADSes in batch:
+        for SARDSes in batch:
             for i in range(self.batch_size):
-                state, action, reward, done, next_state = SADSes[i]
+                state, action, reward, done, next_state = SARDSes[i]
 
                 state = torch.FloatTensor(np.array(state))
                 q_value = self._q(state)
@@ -123,14 +105,12 @@ class DQNROSTAgent(nn.Module):
         return self._ended_rewards
 
 
-def get_session(agent, env, train_agent=False):
+def get_session(agent, env):
     state = env.reset()
     total_reward = 0
     for _ in range(1000):
-        action = agent.get_action(state, train=train_agent)
+        action = agent.get_action(state, train=False)
         next_state, reward, done, _ = env.step(action)
-        if train_agent:
-            agent.fit_DQN(state, action, reward, done, next_state)
         state = next_state
         total_reward += reward
 
@@ -158,13 +138,13 @@ def train(env, agent, log_folder='logs', name='DQNROST', epoch_n=1000, episode_n
         epoch_info = EpochLog(time() - t, mean_reward, epoch_rewards, test_mean_reward, test_rewards)
         train_info.add_epoch(epoch_info)
 
-        save_log(train_info, log_folder + '\\' + train_info.name + '_log' + '.json')
+        save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
 
 
 def make_env():
-    # env = gym.make("CartPole-v1")
-    env = DubinsCar()
+    env = gym.make("CartPole-v1")
+    # env = DubinsCar()
     # env = SimpleControlProblem_Discrete()
     return env
 
@@ -175,14 +155,15 @@ def main():
     env = make_env()
     print('Used', device)
 
-    hyper_parameters = {'gamma': 0.95, 'batch_size': 32, 'learning_rate': 1e-4,
-                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9996, 'episode_len': 2, 'st_coefficient': 1e-3}
+    hyper_parameters = {'gamma': 0.95, 'batch_size': 64, 'learning_rate': 1e-4,
+                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'episode_len': 2, 'st_coefficient': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DQNROSTAgent(state_dim, action_n, make_env, hyper_parameters, device)
+    network = NetworkD64D64(state_dim, action_n)
+    agent = DQNROSTAgent(network, state_dim, action_n, make_env, hyper_parameters, device)
 
-    train(env, agent, 'logs_DubinsCar')
+    train(env, agent, 'logs')
 
 
 if __name__ == '__main__':

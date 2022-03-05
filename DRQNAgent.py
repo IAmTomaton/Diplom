@@ -1,50 +1,20 @@
 import math
-import gym
 import numpy as np
 import torch
 from torch import nn
 from time import sleep, time
 from Buffer import Buffer
-from EpochLog import EpochLog
-from TrainLog import TrainLog
+from train_info.epoch_log import EpochLog
+from train_info.train_log import TrainLog
 from log import save_log
+from networks.NetworkD64D72LSTM64 import NetworkD64D72LSTM64
 from other.DubinsCar_Discrete import DubinsCar
-from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from utils import print_log
-
-
-class NetworkLSTM(nn.Module):
-
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-        self.rnn_hidden_size = 64
-        self.rnn_input_size = 72
-        self.hid = nn.Linear(input_dim, self.rnn_input_size)
-        self.lstm = nn.LSTMCell(self.rnn_input_size, self.rnn_hidden_size)
-        self.logits = nn.Linear(self.rnn_hidden_size, output_dim)
-        self.relu = nn.ReLU()
-
-    def forward(self, prev_state, obs_state):
-        hidden = self.hid(obs_state)
-        hidden = self.relu(hidden)
-
-        h_new, c_new = self.lstm(hidden, prev_state)
-
-        logits = self.logits(h_new)
-
-        return (h_new, c_new), logits
-
-    def get_initial_state(self, batch_size):
-        return torch.zeros((batch_size, self.rnn_hidden_size)), torch.zeros((batch_size, self.rnn_hidden_size))
-
-    def step(self, prev_state, obs_t):
-        (h, c), l = self.forward(prev_state, obs_t)
-        return (h.detach(), c.detach()), l.detach()
 
 
 class DRQNAgent(nn.Module):
 
-    def __init__(self, state_dim, action_n, hyper_parameters, device):
+    def __init__(self, network, state_dim, action_n, hyper_parameters, device):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
@@ -62,7 +32,7 @@ class DRQNAgent(nn.Module):
         self.hyper_parameters = hyper_parameters
 
         self._memory = Buffer(self.memory_size)
-        self._q = NetworkLSTM(self._state_dim, self._action_n)
+        self._q = network
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
     def get_action(self, prev_memories, state, train=False):
@@ -181,7 +151,7 @@ def train(env, agent, log_folder='logs', name='DRQN', epoch_n=100, session_n=20,
         epoch_info = EpochLog(time() - t, mean_reward, rewards, test_mean_reward, test_rewards)
         train_info.add_epoch(epoch_info)
 
-        save_log(train_info, log_folder + '\\' + train_info.name + '_log' + '.json')
+        save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
 
 
@@ -198,7 +168,8 @@ def main():
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    agent = DRQNAgent(state_dim, action_n, hyper_parameters, device)
+    network = NetworkD64D72LSTM64(state_dim, action_n)
+    agent = DRQNAgent(network, state_dim, action_n, hyper_parameters, device)
 
     train(env, agent, 'logs_DubinsCar')
 
