@@ -12,10 +12,10 @@ class TrainLog:
         self.epochs.append(epoch)
 
     @classmethod
-    def from_dict(cls, dict):
-        train_info = cls(dict["name"], dict["hyper_parameters"])
-        train_info._apply_dict(dict)
+    def from_dict(cls, dictionary):
+        train_info = cls(dictionary["name"], dictionary["hyper_parameters"])
+        train_info._apply_dict(dictionary)
         return train_info
 
-    def _apply_dict(self, dict):
-        self.epochs = list(map(EpochLog.from_json, dict["epochs"]))
+    def _apply_dict(self, dictionary):
+        self.epochs = list(map(EpochLog.from_json, dictionary["epochs"]))
