@@ -206,7 +206,7 @@ def main():
                                 nn.ReLU())
     agent = DRQNROSTCDAgent(network, noise, state_dim, action_n)
 
-    train(make_env, agent, 'logs', 'test')
+    train(make_env, agent, 'logs\\CartPole', 'DRQNROSTCD')
 
 
 if __name__ == '__main__':

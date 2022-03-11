@@ -172,7 +172,7 @@ def main():
                                 nn.ReLU())
     agent = DRQNSTCDAgent(network, noise, state_dim, action_n)
 
-    train(env, agent, 'logs', 'test')
+    train(env, agent, 'logs\\CartPole', 'DRQNSTCD')
 
 
 if __name__ == '__main__':

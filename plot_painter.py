@@ -113,7 +113,7 @@ class FileInfo(tk.Frame):
 
 class FolderFrame(tk.Frame):
 
-    def __init__(self, master, folder, fig, call_back):
+    def __init__(self, master, folder, name, fig, call_back):
         super().__init__(master)
 
         self._fig = fig
@@ -127,7 +127,7 @@ class FolderFrame(tk.Frame):
         self._file_frame = ScrollableFrame(self._control_frame, 700, 340)
         self._file_frame.pack(side='top')
 
-        self._label = tk.Label(self._file_frame.scrollable_frame, text=self._folder)
+        self._label = tk.Label(self._file_frame.scrollable_frame, text=name)
         self._label.grid(row=0, column=0, sticky="w")
 
         self._file_info_list = []
@@ -176,9 +176,10 @@ class FolderFrame(tk.Frame):
 
 class App(tk.Frame):
 
-    def __init__(self, master, folders):
+    def __init__(self, master, log_folder, folders):
         super().__init__(master)
 
+        self._log_folder = log_folder
         self._folders = folders
 
         self._fig = plt.figure(figsize=(16, 8))
@@ -194,7 +195,7 @@ class App(tk.Frame):
 
     def _open_folder(self, folder):
         self._folder_list.destroy()
-        self._folder_frame = FolderFrame(self, folder, self._fig, self._back)
+        self._folder_frame = FolderFrame(self, self._log_folder + '\\' + folder, folder, self._fig, self._back)
         self._folder_frame.pack()
 
     def _back(self):
@@ -267,11 +268,12 @@ def update_folders(log_list, folders):
 
 
 def main():
-    folders = ['logs', 'logs_DubinsCar', 'logs_SimpleControlProblem_Discrete']
+    log_folder = 'logs'
+    folders = ['CartPole', 'DubinsCar', 'SimpleControlProblem_Discrete']
 
     root = tk.Tk()
 
-    app = App(root, folders)
+    app = App(root, log_folder, folders)
     app.pack()
 
     root.mainloop()
