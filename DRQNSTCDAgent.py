@@ -6,32 +6,31 @@ import numpy as np
 import torch
 from torch import nn
 from time import time
-
-from networks import *
+from Noise import DiscreteUniformNoise
+from SequentialNetwork import SequentialNetwork, LayerType
+from other.DubinsCar_Discrete import DubinsCar
+from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from train_info.train_log import TrainLog
 from train_info.epoch_log import EpochLog
 from log import save_log
 from utils import print_log
 
 
-class DRQNSTCDAgent(nn.Module):
+class DRQNSTCDAgent:
 
-    def __init__(self, network, state_dim, action_n, hyper_parameters, device):
-        super().__init__()
+    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=64,
+                 states_count=4, learning_rate=1e-3, tau=1e-3):
         self._state_dim = state_dim
         self._action_n = action_n
-        self._device = device
 
-        self.epsilon = 1
-        self.gamma = hyper_parameters['gamma']
-        self.min_epsilon = hyper_parameters['min_epsilon']
-        self.mul_epsilon = hyper_parameters['mul_epsilon']
-        self.memory_size = hyper_parameters['memory_size']
-        self.batch_size = hyper_parameters['batch_size']
-        self.states_count = hyper_parameters['states_count']
-        self.learning_rate = hyper_parameters['learning_rate']
-        self.st_coef = hyper_parameters['st_coef']
-        self.hyper_parameters = hyper_parameters
+        self.noise = noise
+
+        self.gamma = gamma
+        self.memory_size = memory_size
+        self.batch_size = batch_size
+        self.states_count = states_count
+        self.learning_rate = learning_rate
+        self.tau = tau
 
         self._memory = []
         self._q = network
@@ -39,25 +38,21 @@ class DRQNSTCDAgent(nn.Module):
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
     def get_action(self, states, train=False):
+        if train and np.random.uniform(0, 1) < self.noise.threshold:
+            return self.noise.get()
+
         memories = self.get_initial_state(1)
 
         for state in states:
             state_tensor = torch.FloatTensor(np.array([state]))
 
             if train:
-                memories, readouts = self._q.step(memories, state_tensor)
+                readouts, memories = self._q.step(state_tensor, memories)
             else:
-                memories, readouts = self._q_target.step(memories, state_tensor)
+                readouts, memories = self._q_target.step(state_tensor, memories)
 
         argmax_action = torch.argmax(readouts)
-
-        if not train:
-            return int(argmax_action)
-
-        probs = np.ones(self._action_n) * self.epsilon / self._action_n
-        probs[argmax_action] += 1 - self.epsilon
-        actions = np.arange(self._action_n)
-        return np.random.choice(actions, p=probs)
+        return int(argmax_action)
 
     def fit_agent(self, state, action, reward, done, next_state):
         self._memory.append([state, action, reward, done, next_state])
@@ -74,10 +69,10 @@ class DRQNSTCDAgent(nn.Module):
                 states, actions, rewards, danes, next_states = list(zip(*batch[k]))
 
                 states_tensor = torch.FloatTensor(np.array(states))
-                memories, q_values = self._q(memories, states_tensor)
+                q_values, memories = self._q(states_tensor, memories)
 
                 next_states_tensor = torch.FloatTensor(np.array(next_states))
-                next_memories, next_q_values = self._q_target(next_memories, next_states_tensor)
+                next_q_values, next_memories = self._q_target(next_states_tensor, next_memories)
 
             targets = q_values.clone()
             for i in range(self.batch_size):
@@ -90,12 +85,24 @@ class DRQNSTCDAgent(nn.Module):
             self._optimizer.zero_grad()
 
             for target_param, param in zip(self._q_target.parameters(), self._q.parameters()):
-                target_param.data.copy_((1 - self.st_coef) * target_param.data + self.st_coef * param.data)
-
-            self.epsilon = max(self.min_epsilon, self.epsilon * self.mul_epsilon)
+                target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
 
     def get_initial_state(self, batch_size):
         return self._q.get_initial_state(batch_size)
+
+    def get_hyper_parameters(self):
+        return {
+            'agent_parameters': {
+                'gamma': self.gamma,
+                'memory_size': self.memory_size,
+                'batch_size': self.batch_size,
+                'states_count': self.states_count,
+                'learning_rate': self.learning_rate,
+                'tau': self.tau
+            },
+            'noise_parameters': self.noise.get_hyper_parameters(),
+            'network_parameters': self._q.get_hyper_parameters(),
+        }
 
     def _get_batch(self):
         batch_indexes = random.sample(range(self.states_count - 1, len(self._memory)), self.batch_size)
@@ -130,11 +137,12 @@ def get_session(agent, env, train_agent=False):
 
 
 def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n=20, test_n=20):
-    train_info = TrainLog(name, agent.hyper_parameters)
+    train_info = TrainLog(name, agent.get_hyper_parameters())
 
     for epoch in range(epoch_n):
         t = time()
         rewards = [get_session(agent, env, train_agent=True) for _ in range(session_n)]
+        agent.noise.reduce()
         mean_reward = np.mean(rewards)
 
         test_rewards = [get_session(agent, env) for _ in range(test_n)]
@@ -145,26 +153,26 @@ def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n
         train_info.add_epoch(epoch_info)
 
         save_log(train_info, log_folder + '\\' + train_info.name)
-        print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
+        print_log(epoch, mean_reward, time() - t, test_mean_reward, std_dev)
 
 
 def main():
-    use_cuda = torch.cuda.is_available() and False
-    device = torch.device('cuda' if use_cuda else 'cpu')
     env = gym.make("CartPole-v1")
     # env = DubinsCar()
     # env = SimpleControlProblem_Discrete()
-    print('Used', device)
-
-    hyper_parameters = {'memory_size': 30000, 'gamma': 0.99, 'batch_size': 32, 'learning_rate': 1e-4,
-                        'min_epsilon': 1e-4, 'mul_epsilon': 0.9999, 'states_count': 4, 'st_coef': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    network = NetworkD64D72LSTM64D64(state_dim, action_n)
-    agent = DRQNSTCDAgent(network, state_dim, action_n, hyper_parameters, device)
+    noise = DiscreteUniformNoise(action_n)
+    network = SequentialNetwork(state_dim,
+                                [(LayerType.Dense, 128),
+                                 (LayerType.LSTM, 64),
+                                 (LayerType.Dense, 32),
+                                 (LayerType.Dense, action_n)],
+                                nn.ReLU())
+    agent = DRQNSTCDAgent(network, noise, state_dim, action_n)
 
-    train(env, agent, 'logs', 'DRQNSTCD_D64D72LSTM64D64_2')
+    train(env, agent, 'logs', 'test')
 
 
 if __name__ == '__main__':

@@ -5,107 +5,66 @@ import torch
 import gym
 from torch import nn
 from time import time
+
+from Noise import DiscreteUniformNoise
+from SequentialNetwork import SequentialNetwork, LayerType
 from train_info.epoch_log import EpochLog
 from train_info.train_log import TrainLog
 from log import save_log
-from networks import *
 from other.DubinsCar_Discrete import DubinsCar
 from utils import print_log
 
 
 class DRQNROSTAgent(nn.Module):
 
-    def __init__(self, network, state_dim, action_n, make_env, hyper_parameters, device):
+    def __init__(self, network, noise, state_dim, action_n, gamma=1, episode_n=2, batch_size=32,
+                 learning_rate=1e-3, tau=1e-3):
         super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
-        self._device = device
 
-        self.gamma = hyper_parameters['gamma']
-        self.epsilon = 1
-        self.min_epsilon = hyper_parameters['min_epsilon']
-        self.mul_epsilon = hyper_parameters['mul_epsilon']
-        self.batch_size = hyper_parameters['batch_size']
-        self.episode_len = hyper_parameters['episode_len']
-        self.learning_rate = hyper_parameters['learning_rate']
-        self.st_coef = hyper_parameters['st_coef']
-        self.hyper_parameters = hyper_parameters
+        self.noise = noise
+
+        self.gamma = gamma
+        self.batch_size = batch_size
+        self.episode_n = episode_n
+        self.learning_rate = learning_rate
+        self.tau = tau
 
         self._q = network
         self._q_target = copy.deepcopy(self._q)
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
-        self._envs = [make_env() for _ in range(self.batch_size)]
-        self._memories = [self.get_initial_state(1) for _ in range(self.batch_size)]
-        self._env_states = [env.reset() for env in self._envs]
-        self._rewards = [0 for _ in range(self.batch_size)]
-        self._ended_rewards = []
-
-    def get_action(self, memory, state, train=False):
-        state = torch.FloatTensor(np.array(state))
+    def get_action(self, state, prev_memories, train=False):
+        state = torch.FloatTensor(np.array([state]))
 
         if train:
-            new_memory, readouts = self._q.step(memory, state)
+            readouts, new_memories = self._q.step(state, prev_memories)
+            if np.random.uniform(0, 1) < self.noise.threshold:
+                return self.noise.get(), new_memories
         else:
-            new_memory, readouts = self._q_target.step(memory, state)
+            readouts, new_memories = self._q_target.step(state, prev_memories)
+
         argmax_action = torch.argmax(readouts)
+        return int(argmax_action), new_memories
 
-        if not train:
-            return new_memory, int(argmax_action)
-
-        probs = np.ones(self._action_n) * self.epsilon / self._action_n
-        probs[argmax_action] += 1 - self.epsilon
-        actions = np.arange(self._action_n)
-        return new_memory, np.random.choice(actions, p=probs)
-
-    def make_step(self, i):
-        memory = self._memories[i]
-        state = self._env_states[i]
-        env = self._envs[i]
-
-        new_memory, action = self.get_action(memory, [state], train=True)
-        next_state, reward, done, _ = env.step(action)
-        self._rewards[i] += reward
-
-        if done:
-            new_memory = self.get_initial_state(1)
-            next_state = env.reset()
-            self._ended_rewards.append(self._rewards[i])
-            self._rewards[i] = 0
-
-        self._memories[i] = new_memory
-        self._env_states[i] = next_state
-
-        return state, action, reward, done, next_state
-
-    def get_batch(self):
-        self._ended_rewards = []
-        for _ in range(self.episode_len):
-            yield [self.make_step(i) for i in range(self.batch_size)]
-
-    def fit_agent(self):
-        memories = [mem for mem in self._memories]
-        for h, c in memories:
-            h.detach()
-            c.detach()
-
+    def fit_agent(self, batch, init_memories):
         loss = 0
-        batch = list(self.get_batch())
 
-        for SADSes in batch:
+        for batch_slice in batch:
             for i in range(self.batch_size):
-                state, action, reward, done, next_state = SADSes[i]
-                memory = memories[i]
+                state, action, reward, done, next_state = batch_slice[i]
+                memory = init_memories[i]
 
                 state = torch.FloatTensor(np.array([state]))
-                lstm_state, q_value = self._q(memory, state)
+                q_value, lstm_state = self._q(state, memory)
 
                 next_state = torch.FloatTensor(np.array([next_state]))
-                next_lstm_state, next_q_value = self._q_target(lstm_state, next_state)
+                next_q_value, next_lstm_state = self._q_target(next_state, lstm_state)
 
                 if done:
                     lstm_state = self.get_initial_state(1)
-                memories[i] = lstm_state
+                init_memories[i] = lstm_state
 
                 target = q_value.clone()
                 target[0][action] = reward + self.gamma * (1 - done) * max(next_q_value[0])
@@ -115,15 +74,69 @@ class DRQNROSTAgent(nn.Module):
         self._optimizer.step()
         self._optimizer.zero_grad()
 
-        self.epsilon = max(self.min_epsilon, self.epsilon * self.mul_epsilon)
-
         for target_param, param in zip(self._q_target.parameters(), self._q.parameters()):
-            target_param.data.copy_((1 - self.st_coef) * target_param.data + self.st_coef * param.data)
-
-        return self._ended_rewards
+            target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
 
     def get_initial_state(self, batch_size):
         return self._q.get_initial_state(batch_size)
+
+    def get_hyper_parameters(self):
+        return {
+            'agent_parameters': {
+                'gamma': self.gamma,
+                'batch_size': self.batch_size,
+                'episode_n': self.episode_n,
+                'learning_rate': self.learning_rate,
+                'tau': self.tau
+            },
+            'noise_parameters': self.noise.get_hyper_parameters(),
+            'network_parameters': self._q.get_hyper_parameters(),
+        }
+
+
+class Pool:
+
+    def __init__(self, agent, make_env):
+        self._agent = agent
+        self._envs = [make_env() for _ in range(self._agent.batch_size)]
+        self._memories = [self._agent.get_initial_state(1) for _ in range(self._agent.batch_size)]
+        self._env_states = [env.reset() for env in self._envs]
+        self._rewards = [0 for _ in range(self._agent.batch_size)]
+        self._ended_rewards = []
+
+    def get_memories(self):
+        memories = [mem for mem in self._memories]
+        for h, c in memories:
+            h.detach()
+            c.detach()
+        return memories
+
+    def make_step(self):
+        self._ended_rewards = []
+        batch = []
+        for _ in range(self._agent.episode_n):
+            batch.append([self._make_step_in_env(i) for i in range(self._agent.batch_size)])
+        return batch, self._ended_rewards
+
+    def _make_step_in_env(self, i):
+        memory = self._memories[i]
+        state = self._env_states[i]
+        env = self._envs[i]
+
+        action, new_memory = self._agent.get_action(state, memory, train=True)
+        next_state, reward, done, _ = env.step(action)
+        self._rewards[i] += reward
+
+        if done:
+            new_memory = self._agent.get_initial_state(1)
+            next_state = env.reset()
+            self._ended_rewards.append(self._rewards[i])
+            self._rewards[i] = 0
+
+        self._memories[i] = new_memory
+        self._env_states[i] = next_state
+
+        return state, action, reward, done, next_state
 
 
 def get_session(agent, env):
@@ -133,7 +146,7 @@ def get_session(agent, env):
 
     total_reward = 0
     while not done:
-        new_memories, action = agent.get_action(prev_memories, [state], train=False)
+        action, new_memories = agent.get_action(state, prev_memories, train=False)
         next_state, reward, done, _ = env.step(action)
         state = next_state
         prev_memories = new_memories
@@ -145,15 +158,21 @@ def get_session(agent, env):
     return total_reward
 
 
-def train(env, agent, log_folder='logs', name='DRQNROST', epoch_n=1000, episode_n=200, test_n=20):
-    train_info = TrainLog(name, agent.hyper_parameters)
+def train(make_env, agent, log_folder='logs', name='DRQNROST', epoch_n=100, episode_n=100, test_n=20):
+    train_info = TrainLog(name, agent.get_hyper_parameters())
+    env = make_env()
+    pool = Pool(agent, make_env)
 
     for epoch in range(epoch_n):
         t = time()
         epoch_rewards = []
         for _ in range(episode_n):
-            rewards = agent.fit_agent()
+            memories = pool.get_memories()
+            batch, rewards = pool.make_step()
+            agent.fit_agent(batch, memories)
             epoch_rewards += rewards
+
+        agent.noise.reduce()
 
         mean_reward = np.mean(epoch_rewards)
         test_rewards = [get_session(agent, env) for _ in range(test_n)]
@@ -165,30 +184,30 @@ def train(env, agent, log_folder='logs', name='DRQNROST', epoch_n=1000, episode_
         train_info.add_epoch(epoch_info)
 
         save_log(train_info, log_folder + '\\' + train_info.name)
-        print_log(epoch, mean_reward, time() - t, agent.epsilon, test_mean_reward, std_dev)
+        print_log(epoch, mean_reward, time() - t, test_mean_reward, std_dev)
 
 
 def make_env():
-    env = gym.make("CartPole-v2")
+    env = gym.make("CartPole-v1")
     # env = DubinsCar()
     return env
 
 
 def main():
-    use_cuda = torch.cuda.is_available() and False
-    device = torch.device('cuda' if use_cuda else 'cpu')
     env = make_env()
-    print('Used', device)
-
-    hyper_parameters = {'gamma': 0.99, 'batch_size': 64, 'learning_rate': 1e-4, 'min_epsilon': 1e-4,
-                        'mul_epsilon': 0.9999, 'episode_len': 4, 'st_coef': 1e-3}
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    network = NetworkD64D72LSTM64D64(state_dim, action_n)
-    agent = DRQNROSTAgent(network, state_dim, action_n, make_env, hyper_parameters, device)
+    noise = DiscreteUniformNoise(action_n)
+    network = SequentialNetwork(state_dim,
+                                [(LayerType.Dense, 128),
+                                 (LayerType.LSTM, 64),
+                                 (LayerType.Dense, 32),
+                                 (LayerType.Dense, action_n)],
+                                nn.ReLU())
+    agent = DRQNROSTAgent(network, noise, state_dim, action_n)
 
-    train(env, agent, 'logs', 'DRQNROST_D64D72LSTM64D64_2')
+    train(make_env, agent, 'logs', 'test')
 
 
 if __name__ == '__main__':
