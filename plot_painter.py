@@ -205,6 +205,9 @@ class App(tk.Frame):
         self._folder_frame.destroy()
         self._set_folder_list()
 
+    def on_closing(self):
+        plt.close(self._fig)
+
 
 def draw_graphics(fig, files):
     log_data = [read_log(path) for path in files]
@@ -278,6 +281,11 @@ def main():
 
     app = App(root, log_folder, folders)
     app.pack()
+
+    def on_closing():
+        app.on_closing()
+        root.destroy()
+    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     root.mainloop()
 
