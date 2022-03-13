@@ -127,7 +127,7 @@ class FolderFrame(tk.Frame):
         self._control_frame = tk.Frame(self)
         self._control_frame.grid(column=0, row=0, sticky="n")
 
-        self._file_frame = ScrollableFrame(self._control_frame, 700, 200)
+        self._file_frame = ScrollableFrame(self._control_frame, 700, 250)
         self._file_frame.pack(side='top')
 
         self._label = tk.Label(self._file_frame.scrollable_frame, text=name)
@@ -148,6 +148,11 @@ class FolderFrame(tk.Frame):
         save_button.pack(fill='x', padx=1, pady=1)
         back_button = tk.Button(self._buttons_frame, text='Back', command=call_back)
         back_button.pack(fill='x', padx=1, pady=1)
+
+        self._real_time_draw_state = tk.IntVar()
+        real_time_draw = tk.Checkbutton(self._buttons_frame, text='real time draw', variable=self._real_time_draw_state,
+                                        command=self._set_real_time_draw)
+        real_time_draw.pack(fill='x', padx=1, pady=1)
 
         self._canvas_widget = self._canvas.get_tk_widget()
         self._canvas_widget.grid(column=1, row=0)
@@ -175,6 +180,11 @@ class FolderFrame(tk.Frame):
             file_info = FileInfo(self._file_frame.scrollable_frame, self._states[i], self._files[i])
             self._file_info_list.append(file_info)
             file_info.grid(row=i + 1, column=0, sticky="w")
+
+    def _set_real_time_draw(self):
+        if self._real_time_draw_state.get():
+            draw(self._fig, self._canvas, self._get_selected_paths())
+            self.after(5000, self._set_real_time_draw)
 
 
 class App(tk.Frame):
@@ -210,6 +220,8 @@ class App(tk.Frame):
 
 
 def draw_graphics(fig, files):
+    if not files:
+        return
     log_data = [read_log(path) for path in files]
 
     fig.clf()
