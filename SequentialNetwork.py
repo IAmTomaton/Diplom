@@ -47,7 +47,8 @@ class SequentialNetwork(nn.Module):
                 memory = layer(hid, memory)
                 hid = memory[0]
 
-            hid = self._hidden_activation(hid)
+            if i < len(self._layer_types) - 1:
+                hid = self._hidden_activation(hid)
 
         if self._output_activation is not None:
             hid = self._output_activation(hid)
