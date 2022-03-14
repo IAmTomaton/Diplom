@@ -96,16 +96,16 @@ class FileInfo(tk.Frame):
         check_button = tk.Checkbutton(control_frame, variable=self._variable, text=self._train_info.name)
         check_button.pack(side='left')
 
-        self._train_info_frame = None
+        self._info_frame = None
 
     def expand_info(self):
-        if self._train_info_frame:
-            self._train_info_frame.destroy()
-            self._train_info_frame = None
+        if self._info_frame:
+            self._info_frame.destroy()
+            self._info_frame = None
         else:
             info = tk.Frame(self)
             info.pack()
-            self._train_info_frame = info
+            self._info_frame = info
 
             name = tk.Label(info, text='Name: ' + self._train_info.name)
             name.pack(anchor='w')
@@ -172,8 +172,8 @@ class FolderFrame(tk.Frame):
     def _update_file_frame(self):
         self._update_files()
 
-        for button in self._file_info_list:
-            button.destroy()
+        for file_info in self._file_info_list:
+            file_info.destroy()
 
         self._states = [tk.IntVar() for _ in self._files]
         for i in range(len(self._files)):
@@ -253,11 +253,15 @@ def draw_graphics(fig, files):
 
         train_rewards = [0] + [a for epoch in train_info.epochs for a in epoch.train_rewards]
         time = [0]
+        shift = 0
         for epoch in train_info.epochs:
+            if not epoch.train_rewards:
+                shift += epoch.time
+                continue
             dt = epoch.time / len(epoch.train_rewards)
-            shift = time[-1]
             epoch_rewards_times = [shift + dt * (t + 1) for t in range(len(epoch.train_rewards))]
             time += epoch_rewards_times
+            shift = time[-1]
         train_reward_ax.plot(time, train_rewards, label=train_info.name)
 
     for ax in [train_mean_ax, test_mean_ax, train_reward_ax, test_reward_ax]:
