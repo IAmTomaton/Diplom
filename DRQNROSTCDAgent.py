@@ -16,11 +16,10 @@ from train_info.train_log import TrainLog
 from utils import print_log
 
 
-class DRQNROSTCDAgent(nn.Module):
+class DRQNROSTCDAgent:
 
     def __init__(self, network, noise, state_dim, action_n, gamma=1, batch_size=32, states_count=4,
                  learning_rate=1e-3, tau=1e-3):
-        super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
 

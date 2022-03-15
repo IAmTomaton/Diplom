@@ -16,11 +16,10 @@ from other.DubinsCar_Discrete import DubinsCar
 from utils import print_log
 
 
-class DRQNSTAgent(nn.Module):
+class DRQNSTAgent:
 
     def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=32, burn_in=8,
                  batch_len=12, learning_rate=1e-3, tau=1e-3):
-        super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
 

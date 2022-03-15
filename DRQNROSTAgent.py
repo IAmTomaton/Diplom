@@ -16,11 +16,10 @@ from other.DubinsCar_Discrete import DubinsCar
 from utils import print_log
 
 
-class DRQNROSTAgent(nn.Module):
+class DRQNROSTAgent:
 
     def __init__(self, network, noise, state_dim, action_n, gamma=1, episode_n=2, batch_size=32,
                  learning_rate=1e-3, tau=1e-3):
-        super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
 
