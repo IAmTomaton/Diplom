@@ -18,7 +18,7 @@ from utils import print_log
 
 class DRQNROSTCDAgent(nn.Module):
 
-    def __init__(self, network, noise, state_dim, action_n, gamma=1, batch_size=32, states_count=2,
+    def __init__(self, network, noise, state_dim, action_n, gamma=1, batch_size=32, states_count=4,
                  learning_rate=1e-3, tau=1e-3):
         super().__init__()
         self._state_dim = state_dim
@@ -127,14 +127,14 @@ class Pool:
         next_state, reward, done, _ = env.step(action)
         self._rewards[i] += reward
 
-        if done:
-            next_state = env.reset()
-            self._env_prev_states[i] = [next_state] * self._agent.states_count
-            self._ended_rewards.append(self._rewards[i])
-            self._rewards[i] = 0
-
         states.pop(0)
         states.append(next_state)
+
+        if done:
+            new_state = env.reset()
+            self._env_prev_states[i] = [new_state] * self._agent.states_count
+            self._ended_rewards.append(self._rewards[i])
+            self._rewards[i] = 0
 
         return state, action, reward, done, next_state
 
@@ -158,7 +158,7 @@ def get_session(agent, env):
     return total_reward
 
 
-def train(make_env, agent, log_folder='logs', name='DRQNROSTCD', epoch_n=200, fit_n=500, test_n=20):
+def train(make_env, agent, log_folder='logs', name='DRQNROSTCD', epoch_n=1000, fit_n=500, test_n=20):
     train_log = TrainLog(name, agent.get_hyper_parameters())
     env = make_env()
     pool = Pool(agent, make_env)
@@ -186,9 +186,9 @@ def train(make_env, agent, log_folder='logs', name='DRQNROSTCD', epoch_n=200, fi
 
 
 def make_env():
-    env = gym.make("CartPole-v1")
+    # env = gym.make("CartPole-v3")
     # env = DubinsCar()
-    # env = SimpleControlProblem_Discrete()
+    env = SimpleControlProblem_Discrete()
     return env
 
 
@@ -199,14 +199,14 @@ def main():
     action_n = env.action_space.n
     noise = DiscreteUniformNoise(action_n)
     network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 128),
+                                [(LayerType.Dense, 64),
                                  (LayerType.LSTM, 64),
                                  (LayerType.Dense, 32),
                                  (LayerType.Dense, action_n)],
                                 nn.ReLU())
-    agent = DRQNROSTCDAgent(network, noise, state_dim, action_n)
+    agent = DRQNROSTCDAgent(network, noise, state_dim, action_n, learning_rate=1e-2, tau=1e-2)
 
-    train(make_env, agent, 'logs\\CartPole', 'DRQNROSTCD')
+    train(make_env, agent, 'logs\\SimpleControlProblem_Discrete', 'DRQNROSTCD_1')
 
 
 if __name__ == '__main__':

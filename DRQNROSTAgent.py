@@ -8,6 +8,7 @@ from time import time
 
 from Noise import DiscreteUniformNoise
 from SequentialNetwork import SequentialNetwork, LayerType
+from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from train_info.epoch_log import EpochLog
 from train_info.train_log import TrainLog
 from log import save_log
@@ -127,14 +128,14 @@ class Pool:
         next_state, reward, done, _ = env.step(action)
         self._rewards[i] += reward
 
+        self._env_states[i] = next_state
+        self._memories[i] = new_memory
+
         if done:
-            new_memory = self._agent.get_initial_state(1)
-            next_state = env.reset()
+            self._memories[i] = self._agent.get_initial_state(1)
+            self._env_states[i] = env.reset()
             self._ended_rewards.append(self._rewards[i])
             self._rewards[i] = 0
-
-        self._memories[i] = new_memory
-        self._env_states[i] = next_state
 
         return state, action, reward, done, next_state
 
@@ -158,7 +159,7 @@ def get_session(agent, env):
     return total_reward
 
 
-def train(make_env, agent, log_folder='logs', name='DRQNROST', epoch_n=100, episode_n=100, test_n=20):
+def train(make_env, agent, log_folder='logs', name='DRQNROST', epoch_n=500, episode_n=100, test_n=1):
     train_info = TrainLog(name, agent.get_hyper_parameters())
     env = make_env()
     pool = Pool(agent, make_env)
@@ -172,8 +173,6 @@ def train(make_env, agent, log_folder='logs', name='DRQNROST', epoch_n=100, epis
             agent.fit_agent(batch, memories)
             epoch_rewards += rewards
 
-        agent.noise.reduce()
-
         mean_reward = np.mean(epoch_rewards)
         test_rewards = [get_session(agent, env) for _ in range(test_n)]
         test_mean_reward = np.mean(test_rewards)
@@ -186,10 +185,13 @@ def train(make_env, agent, log_folder='logs', name='DRQNROST', epoch_n=100, epis
         save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, test_mean_reward, std_dev)
 
+        agent.noise.reduce()
+
 
 def make_env():
-    env = gym.make("CartPole-v1")
-    # env = DubinsCar()
+    # env = gym.make("CartPole-v2")
+    env = DubinsCar()
+    # env = SimpleControlProblem_Discrete()
     return env
 
 
@@ -198,16 +200,16 @@ def main():
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    noise = DiscreteUniformNoise(action_n)
+    noise = DiscreteUniformNoise(action_n, threshold_decrease=0.01)
     network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 128),
+                                [(LayerType.Dense, 64),
                                  (LayerType.LSTM, 64),
-                                 (LayerType.Dense, 32),
+                                 (LayerType.Dense, 64),
                                  (LayerType.Dense, action_n)],
                                 nn.ReLU())
-    agent = DRQNROSTAgent(network, noise, state_dim, action_n)
+    agent = DRQNROSTAgent(network, noise, state_dim, action_n, batch_size=16, episode_n=2, learning_rate=1e-3, tau=1e-3)
 
-    train(make_env, agent, 'logs\\CartPole', 'DRQNROST')
+    train(make_env, agent, 'logs\\DubinsCar', 'DRQNROST_1')
 
 
 if __name__ == '__main__':
