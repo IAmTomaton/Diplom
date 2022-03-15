@@ -6,10 +6,10 @@ import torch
 from torch import nn
 from time import time
 
-from Noise import DiscreteUniformNoise
 from SequentialNetwork import SequentialNetwork, LayerType
 from log import save_log
 from other.DubinsCar_Discrete import DubinsCar
+from other.Noises import DiscreteUniformNoise
 from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from train_info.epoch_log import EpochLog
 from train_info.train_log import TrainLog

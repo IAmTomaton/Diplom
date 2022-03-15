@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from torch import nn
 from time import time
-from Noise import DiscreteUniformNoise
 from SequentialNetwork import SequentialNetwork, LayerType
+from other.Noises import DiscreteUniformNoise
 from train_info.train_log import TrainLog
 from Buffer import Buffer
 from train_info.epoch_log import EpochLog
@@ -16,10 +16,11 @@ from other.DubinsCar_Discrete import DubinsCar
 from utils import print_log
 
 
-class DRQNSTAgent:
+class DRQNSTAgent(nn.Module):
 
-    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=32,
-                 burn_in=8, batch_len=12, learning_rate=1e-3, tau=1e-3):
+    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=32, burn_in=8,
+                 batch_len=12, learning_rate=1e-3, tau=1e-3):
+        super().__init__()
         self._state_dim = state_dim
         self._action_n = action_n
 
@@ -131,7 +132,7 @@ def get_session(agent, env, batch_size=1, train_agent=False):
     return total_reward
 
 
-def train(env, agent, log_folder='logs', name='DRQNST', epoch_n=100, session_n=20, test_n=20):
+def train(env, agent, log_folder='logs', name='DRQNST', epoch_n=200, session_n=20, test_n=20):
     train_info = TrainLog(name, agent.get_hyper_parameters())
 
     for epoch in range(epoch_n):
@@ -152,22 +153,23 @@ def train(env, agent, log_folder='logs', name='DRQNST', epoch_n=100, session_n=2
 
 
 def main():
-    env = gym.make("CartPole-v1")
-    # env = DubinsCar()
+    # env = gym.make("CartPole-v1")
+    env = DubinsCar()
     # env = SimpleControlProblem_Discrete()
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    noise = DiscreteUniformNoise(action_n)
+    noise = DiscreteUniformNoise(action_n, threshold_decrease=0.01)
     network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 128),
+                                [(LayerType.Dense, 64),
                                  (LayerType.LSTM, 64),
                                  (LayerType.Dense, 32),
                                  (LayerType.Dense, action_n)],
                                 nn.ReLU())
-    agent = DRQNSTAgent(network, noise, state_dim, action_n)
+    agent = DRQNSTAgent(network, noise, state_dim, action_n, burn_in=8, batch_len=12, gamma=1, learning_rate=1e-3,
+                        tau=1e-3)
 
-    train(env, agent, 'logs\\CartPole', 'DRQNST')
+    train(env, agent, 'logs\\DubinsCar', 'DRQNST_1')
 
 
 if __name__ == '__main__':

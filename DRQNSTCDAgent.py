@@ -6,9 +6,9 @@ import numpy as np
 import torch
 from torch import nn
 from time import time
-from Noise import DiscreteUniformNoise
 from SequentialNetwork import SequentialNetwork, LayerType
 from other.DubinsCar_Discrete import DubinsCar
+from other.Noises import DiscreteUniformNoise
 from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
 from train_info.train_log import TrainLog
 from train_info.epoch_log import EpochLog
@@ -18,8 +18,8 @@ from utils import print_log
 
 class DRQNSTCDAgent:
 
-    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=64,
-                 states_count=4, learning_rate=1e-3, tau=1e-3):
+    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=64, states_count=4,
+                 learning_rate=1e-3, tau=1e-3):
         self._state_dim = state_dim
         self._action_n = action_n
 
@@ -85,7 +85,7 @@ class DRQNSTCDAgent:
             self._optimizer.zero_grad()
 
             for target_param, param in zip(self._q_target.parameters(), self._q.parameters()):
-                target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
+                target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
 
     def get_initial_state(self, batch_size):
         return self._q.get_initial_state(batch_size)
@@ -136,7 +136,7 @@ def get_session(agent, env, train_agent=False):
     return total_reward
 
 
-def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n=20, test_n=20):
+def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=1000, session_n=20, test_n=20):
     train_info = TrainLog(name, agent.get_hyper_parameters())
 
     for epoch in range(epoch_n):
@@ -157,22 +157,23 @@ def train(env, agent, log_folder='logs', name='DRQNSTCD', epoch_n=200, session_n
 
 
 def main():
-    env = gym.make("CartPole-v1")
+    env = gym.make("CartPole-v2")
     # env = DubinsCar()
     # env = SimpleControlProblem_Discrete()
 
     state_dim = env.observation_space.shape[0]
     action_n = env.action_space.n
-    noise = DiscreteUniformNoise(action_n)
+    noise = DiscreteUniformNoise(action_n, threshold_decrease=0.01)
     network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 128),
+                                [(LayerType.Dense, 64),
                                  (LayerType.LSTM, 64),
                                  (LayerType.Dense, 32),
                                  (LayerType.Dense, action_n)],
                                 nn.ReLU())
-    agent = DRQNSTCDAgent(network, noise, state_dim, action_n)
+    agent = DRQNSTCDAgent(network, noise, state_dim, action_n, states_count=4, memory_size=50000, gamma=1,
+                          learning_rate=1e-2, tau=1e-2, batch_size=32)
 
-    train(env, agent, 'logs\\CartPole', 'DRQNSTCD')
+    train(env, agent, 'logs\\CartPole', 'DRQNSTCD_3')
 
 
 if __name__ == '__main__':
