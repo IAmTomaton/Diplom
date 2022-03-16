@@ -44,7 +44,7 @@ class DRQNSTAgent:
     def fit_agent(self, state, action, reward, done, next_state):
         self._add_to_buffer([state, action, reward, done, next_state])
 
-        if len(self._buffer) > self.batch_size * (self.batch_len - self.burn_in):
+        if len(self._buffer) > self.batch_size * self.batch_len:
             batch = self._get_batch()
             memories = self.get_initial_state(self.batch_size)
             loss = 0
@@ -59,11 +59,11 @@ class DRQNSTAgent:
                 next_q_values, next_lstm_states = self._q_target(next_states, lstm_states)
                 memories = lstm_states
 
-                m = torch.zeros((self.batch_size, self.batch_size))
                 for i in range(self.batch_size):
-                    if not danes[i]:
-                        m[i][i] = 1
-                memories = torch.mm(m, memories[0]), torch.mm(m, memories[1])
+                    if danes[i]:
+                        init_mem = self.get_initial_state(1)
+                        memories[0][i] = init_mem[0]
+                        memories[1][i] = init_mem[1]
 
                 if k == self.burn_in:
                     h, c = memories
