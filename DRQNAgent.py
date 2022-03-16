@@ -129,10 +129,11 @@ class DRQNAgent:
         }
 
     def _get_batch(self):
-        batch_indexes = random.sample(range(len(self._buffer) - self.batch_len - 1), self.batch_size)
         if self.inf_mem_depth:
+            batch_indexes = random.sample(range(len(self._buffer) - self.batch_len - 1), self.batch_size)
             return [list(map(lambda j: self._buffer[j + i], batch_indexes)) for i in range(self.batch_len)]
 
+        batch_indexes = random.sample(range(self.states_depth - 1, len(self._buffer)), self.batch_size)
         batch = [[self._buffer[j] for j in batch_indexes]]
         for i in range(1, self.states_depth):
             batch.append([self._buffer[j - i] if j - i >= 0 and not self._buffer[j - i][3] else batch[i - 1][index]
