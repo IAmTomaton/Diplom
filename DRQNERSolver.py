@@ -1,14 +1,9 @@
 import math
 from time import time
-import gym
+
 import numpy as np
-from torch import nn
-from DRQNSTAgent import DRQNSTAgent
-from DRQNSTCDAgent import DRQNSTCDAgent
-from SequentialNetwork import SequentialNetwork, LayerType
+
 from log import save_log
-from other.DubinsCar_Discrete import DubinsCar
-from other.Noises import DiscreteUniformNoise
 from train_info.epoch_log import EpochLog
 from train_info.train_log import TrainLog
 from utils import print_log
@@ -50,27 +45,3 @@ def train(env, agent, log_folder, name, epoch_n=200, session_n=20, test_n=20):
 
         save_log(train_info, log_folder + '\\' + train_info.name)
         print_log(epoch, mean_reward, time() - t, test_mean_reward, std_dev)
-
-
-def main():
-    env = gym.make("CartPole-v1")
-    # env = DubinsCar()
-    # env = SimpleControlProblem_Discrete()
-
-    state_dim = env.observation_space.shape[0]
-    action_n = env.action_space.n
-    noise = DiscreteUniformNoise(action_n, threshold_decrease=0.01)
-    network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 2),
-                                 (LayerType.LSTM, 4),
-                                 (LayerType.Dense, 32),
-                                 (LayerType.Dense, action_n)],
-                                nn.ReLU())
-    agent = DRQNSTAgent(network, noise, state_dim, action_n, batch_size=3, gamma=1, learning_rate=1e-3,
-                          tau=1e-3)
-
-    train(env, agent, 'logs\\CartPole', 'DRQNST_test')
-
-
-if __name__ == '__main__':
-    main()
