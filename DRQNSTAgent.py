@@ -1,19 +1,7 @@
 import copy
-import math
-import gym
+import random
 import numpy as np
 import torch
-from torch import nn
-from time import time
-from SequentialNetwork import SequentialNetwork, LayerType
-from other.Noises import DiscreteUniformNoise
-from train_info.train_log import TrainLog
-from Buffer import Buffer
-from train_info.epoch_log import EpochLog
-from log import save_log
-from other.SimpleControlProblem_Discrete import SimpleControlProblem_Discrete
-from other.DubinsCar_Discrete import DubinsCar
-from utils import print_log
 
 
 class DRQNSTAgent:
@@ -33,29 +21,31 @@ class DRQNSTAgent:
         self.learning_rate = learning_rate
         self.tau = tau
 
-        self._memory = Buffer(self.memory_size)
+        self._buffer = []
         self._q = network
         self._q_target = copy.deepcopy(self._q)
         self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
 
-    def get_action(self, state, prev_memories, train=False):
+        self._memory = self.get_initial_state(1)
+
+    def get_action(self, state, train=False):
         state = torch.FloatTensor(np.array([state]))
 
         if train:
-            readouts, new_memories = self._q.step(state, prev_memories)
+            readouts, self._memory = self._q.step(state, self._memory)
             if np.random.uniform(0, 1) < self.noise.threshold:
-                return self.noise.get(), new_memories
+                return self.noise.get()
         else:
-            readouts, new_memories = self._q_target.step(state, prev_memories)
+            readouts, self._memory = self._q_target.step(state, self._memory)
 
         argmax_action = torch.argmax(readouts)
-        return int(argmax_action), new_memories
+        return int(argmax_action)
 
     def fit_agent(self, state, action, reward, done, next_state):
-        self._memory.add([state, action, reward, done, next_state])
+        self._add_to_buffer([state, action, reward, done, next_state])
 
-        if len(self._memory) > self.batch_size * (self.batch_len - self.burn_in):
-            batch = self._memory.get_batch(self.batch_size, self.batch_len)
+        if len(self._buffer) > self.batch_size * (self.batch_len - self.burn_in):
+            batch = self._get_batch()
             memories = self.get_initial_state(self.batch_size)
             loss = 0
 
@@ -97,6 +87,9 @@ class DRQNSTAgent:
     def get_initial_state(self, batch_size):
         return self._q.get_initial_state(batch_size)
 
+    def reset(self):
+        self._memory = self.get_initial_state(1)
+
     def get_hyper_parameters(self):
         return {
             'agent_parameters': {
@@ -112,64 +105,13 @@ class DRQNSTAgent:
             'network_parameters': self._q.get_hyper_parameters(),
         }
 
+    def _get_batch(self):
+        batch_indexes = random.sample(range(len(self._buffer) - self.batch_len - 1), self.batch_size)
+        batch = [list(map(lambda j: self._buffer[j + i], batch_indexes)) for i in range(self.batch_len)]
+        return batch
 
-def get_session(agent, env, batch_size=1, train_agent=False):
-    state = env.reset()
-    memory = agent.get_initial_state(batch_size)
-    total_reward = 0
-    while True:
-        action, memory = agent.get_action(state, memory, train=train_agent)
-        next_state, reward, done, _ = env.step(action)
-        if train_agent:
-            agent.fit_agent(state, action, reward, done, next_state)
-        state = next_state
-        total_reward += reward
+    def _add_to_buffer(self, data):
+        self._buffer.append(data)
 
-        if done:
-            break
-
-    return total_reward
-
-
-def train(env, agent, log_folder='logs', name='DRQNST', epoch_n=200, session_n=20, test_n=20):
-    train_info = TrainLog(name, agent.get_hyper_parameters())
-
-    for epoch in range(epoch_n):
-        t = time()
-        rewards = [get_session(agent, env, train_agent=True) for _ in range(session_n)]
-        agent.noise.reduce()
-        mean_reward = np.mean(rewards)
-
-        test_rewards = [get_session(agent, env) for _ in range(test_n)]
-        test_mean_reward = np.mean(test_rewards)
-        std_dev = math.sqrt(np.mean([(r - test_mean_reward) ** 2 for r in test_rewards]))
-
-        epoch_info = EpochLog(time() - t, mean_reward, rewards, test_mean_reward, test_rewards)
-        train_info.add_epoch(epoch_info)
-
-        save_log(train_info, log_folder + '\\' + train_info.name)
-        print_log(epoch, mean_reward, time() - t, test_mean_reward, std_dev)
-
-
-def main():
-    # env = gym.make("CartPole-v1")
-    env = DubinsCar()
-    # env = SimpleControlProblem_Discrete()
-
-    state_dim = env.observation_space.shape[0]
-    action_n = env.action_space.n
-    noise = DiscreteUniformNoise(action_n, threshold_decrease=0.01)
-    network = SequentialNetwork(state_dim,
-                                [(LayerType.Dense, 64),
-                                 (LayerType.LSTM, 64),
-                                 (LayerType.Dense, 32),
-                                 (LayerType.Dense, action_n)],
-                                nn.ReLU())
-    agent = DRQNSTAgent(network, noise, state_dim, action_n, burn_in=8, batch_len=12, gamma=1, learning_rate=1e-3,
-                        tau=1e-3)
-
-    train(env, agent, 'logs\\DubinsCar', 'DRQNST_1')
-
-
-if __name__ == '__main__':
-    main()
+        if len(self._buffer) > self.memory_size:
+            self._buffer.pop(0)
