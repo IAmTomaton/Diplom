@@ -21,7 +21,7 @@ class DRQNAgent:
         self.batch_size = batch_size
         self.states_depth = states_depth if not inf_mem_depth else 1
         self.burn_in = burn_in if inf_mem_depth else 0
-        self.batch_len = batch_len
+        self.batch_len = max(batch_len, 1)
         self.learning_rate = learning_rate
         self.tau = tau
         self.inf_mem_depth = inf_mem_depth
