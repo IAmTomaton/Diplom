@@ -1,4 +1,5 @@
 import copy
+import math
 import random
 import numpy as np
 import torch
@@ -6,8 +7,8 @@ import torch
 
 class DRQNAgent:
 
-    def __init__(self, network, noise, state_dim, action_n, gamma=1, memory_size=30000, batch_size=32,
-                 states_depth=4, burn_in=8, batch_len=12, learning_rate=1e-3, tau=1e-3, inf_mem_depth=False):
+    def __init__(self, state_dim, action_n, q_modal, noise, gamma=1, memory_size=30000, batch_size=32,
+                 history_len: int = 4, burn_in=8, trajectory_len=12, learning_rate=1e-3, tau=1e-3):
         """
         If inf_mem_depth is False, then we use an agent with finite memory depth, if True, then with infinite.
         """
@@ -19,97 +20,87 @@ class DRQNAgent:
         self.gamma = gamma
         self.memory_size = memory_size
         self.batch_size = batch_size
-        self.states_depth = states_depth if not inf_mem_depth else 1
-        self.burn_in = burn_in if inf_mem_depth else 0
-        self.batch_len = max(batch_len, 1)
+        self.history_len = history_len
+        self._inf_history_len = math.isinf(history_len)
+        self.burn_in = burn_in
+        self.trajectory_len = max(trajectory_len, 1)
         self.learning_rate = learning_rate
         self.tau = tau
-        self.inf_mem_depth = inf_mem_depth
 
-        self._buffer = []
-        self._q = network
-        self._q_target = copy.deepcopy(self._q)
-        self._optimizer = torch.optim.Adam(self._q.parameters(), lr=self.learning_rate)
+        self._real_history_len = self.history_len if not self._inf_history_len else 1
 
-        self._memory = self.get_initial_state(1)
-        self._prev_states = []
+        self._memory = []
+        self.q_model = q_modal
+        self.q_target_model = copy.deepcopy(self.q_model)
+        self._optimizer = torch.optim.Adam(self.q_model.parameters(), lr=self.learning_rate)
 
-    def get_action(self, state, train=False):
-        if not self._prev_states:
-            self._prev_states = [state] * self.states_depth
-        self._prev_states.pop(0)
-        self._prev_states.append(state)
+        self._hiddens = []
+        self.reset()
 
-        if not self.inf_mem_depth:
-            self._memory = self.get_initial_state(1)
+    def get_action(self, state):
+        state = torch.FloatTensor(np.array([state]))
 
-        for state in self._prev_states:
-            state = torch.FloatTensor(np.array([state]))
+        q_values, hidden = self.q_model(state, self._hiddens[0])
+        action = np.argmax(q_values.data.numpy())
 
-            if train:
-                readouts, self._memory = self._q.step(state, self._memory)
-            else:
-                readouts, self._memory = self._q_target.step(state, self._memory)
+        if self._inf_history_len:
+            self._hiddens[0] = hidden
+        else:
+            for i in range(1, len(self._hiddens)):
+                _, hidden = self.q_model(state, self._hiddens[i])
+                self._hiddens[i - 1] = hidden
 
-        if train and np.random.uniform(0, 1) < self.noise.threshold:
+            self._hiddens[-1] = self.get_initial_state(1)
+
+        if np.random.uniform(0, 1) < self.noise.threshold:
             return self.noise.get()
+        return action
 
-        argmax_action = torch.argmax(readouts)
-        return int(argmax_action)
+    def fit(self, state, action, reward, done, next_state):
+        self._add_to_memory([state, action, reward, done, next_state])
 
-    def fit_agent(self, state, action, reward, done, next_state):
-        self._add_to_buffer([state, action, reward, done, next_state])
-
-        if len(self._buffer) - self.states_depth > self.batch_size * self.batch_len:
-            batch = self._get_batch()
-            memories = self.get_initial_state(self.batch_size)
-            target_memories = self.get_initial_state(self.batch_size)
+        if len(self._memory) - self._real_history_len > self.batch_size * self.trajectory_len:
+            batch, valid_step_counts, make_burn_in = self._get_batch()
+            hiddens = self.get_initial_state(self.batch_size)
+            target_hiddens = self.get_initial_state(self.batch_size)
             loss = 0
 
             for k in range(len(batch)):
                 if k == self.burn_in:
-                    h, c = memories
-                    h.detach()
-                    c.detach()
+                    for i in range(self.batch_size):
+                        if make_burn_in[i]:
+                            hiddens[0][i].detach()
+                            hiddens[1][i].detach()
 
                 states, actions, rewards, danes, next_states = list(zip(*batch[k]))
 
                 states = torch.FloatTensor(np.array(states))
-                q_values, memories = self._q(states, memories)
-                for i in range(self.batch_size):
-                    if danes[i]:
-                        init_mem = self.get_initial_state(1)
-                        memories[0][i] = init_mem[0]
-                        memories[1][i] = init_mem[1]
+                q_values, hiddens = self.q_model(states, hiddens)
 
                 next_states = torch.FloatTensor(np.array(next_states))
-                for i in range(self.batch_size):
-                    if danes[i]:
-                        init_mem = self.get_initial_state(1)
-                        target_memories[0][i] = init_mem[0]
-                        target_memories[1][i] = init_mem[1]
-                next_q_values, target_memories = self._q_target(next_states, target_memories)
+                next_q_values, target_hiddens = self.q_target_model(next_states, target_hiddens)
 
-                if k >= self.burn_in and (k == self.states_depth - 1 or self.inf_mem_depth):
-                    targets = q_values.clone()
+                targets = q_values.clone()
+                if self._inf_history_len or (not self._inf_history_len and k == len(batch) - 1):
                     for i in range(self.batch_size):
-                        targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
-
+                        if not self._inf_history_len or \
+                                ((not make_burn_in[i] or k >= self.burn_in) and k < valid_step_counts[i]):
+                            targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
                     loss += torch.mean((targets.detach() - q_values) ** 2)
 
-            loss.backward()
-            self._optimizer.step()
-            self._optimizer.zero_grad()
+            if type(loss) is not int:
+                loss.backward()
+                self._optimizer.step()
+                self._optimizer.zero_grad()
 
-            for target_param, param in zip(self._q_target.parameters(), self._q.parameters()):
-                target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
+                for target_param, param in zip(self.q_target_model.parameters(), self.q_model.parameters()):
+                    target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
 
     def get_initial_state(self, batch_size):
-        return self._q.get_initial_state(batch_size)
+        return self.q_model.get_initial_state(batch_size)
 
     def reset(self):
-        self._prev_states = []
-        self._memory = self.get_initial_state(1)
+        self._hiddens = [self.get_initial_state(1) for _ in range(self._real_history_len)]
 
     def get_hyper_parameters(self):
         return {
@@ -117,32 +108,65 @@ class DRQNAgent:
                 'gamma': self.gamma,
                 'memory_size': self.memory_size,
                 'batch_size': self.batch_size,
-                'inf_mem_depth': self.inf_mem_depth,
-                'states_depth': self.states_depth,
+                'history_len': self.history_len,
                 'burn_in': self.burn_in,
-                'batch_len': self.batch_len,
+                'trajectory_len': self.trajectory_len,
                 'learning_rate': self.learning_rate,
                 'tau': self.tau
             },
             'noise_parameters': self.noise.get_hyper_parameters(),
-            'network_parameters': self._q.get_hyper_parameters(),
+            'network_parameters': self.q_model.get_hyper_parameters(),
         }
 
     def _get_batch(self):
-        if self.inf_mem_depth:
-            batch_indexes = random.sample(range(len(self._buffer) - self.batch_len - 1), self.batch_size)
-            return [list(map(lambda j: self._buffer[j + i], batch_indexes)) for i in range(self.batch_len)]
+        count = self.trajectory_len if self._inf_history_len else self._real_history_len
+        batch_indexes = random.sample(range(count, len(self._memory) - count), self.batch_size)
 
-        batch_indexes = random.sample(range(self.states_depth - 1, len(self._buffer)), self.batch_size)
-        batch = [[self._buffer[j] for j in batch_indexes]]
-        for i in range(1, self.states_depth):
-            batch.append([self._buffer[j - i] if j - i >= 0 and not self._buffer[j - i][3] else batch[i - 1][index]
-                          for index, j in enumerate(batch_indexes)])
-        batch.reverse()
-        return batch
+        starts = []
+        burn_in = []
+        for i in batch_indexes:
+            start = i
+            for j in range(1, count):
+                start = i - j + 1
+                if self._memory[i - j][3]:
+                    break
+            starts.append(start)
+            burn_in.append(not self._memory[start - 1][3])
 
-    def _add_to_buffer(self, data):
-        self._buffer.append(data)
+        ends = []
+        for i in range(self.batch_size):
+            center = batch_indexes[i]
+            start = starts[i]
+            end = center
+            for j in range(count - center + start):
+                end = center + j
+                if self._memory[center + j][3]:
+                    break
+            ends.append(end)
+        valid_step_count = [ends[i] - starts[i] + 1 for i in range(self.batch_size)]
 
-        if len(self._buffer) > self.memory_size:
-            self._buffer.pop(0)
+        batch = []
+        for j in range(count):
+            batch_slice = []
+            for i in range(self.batch_size):
+                start = starts[i]
+                center = batch_indexes[i]
+
+                if self._inf_history_len:
+                    batch_slice.append(self._memory[start + j])
+                else:
+                    current_index = center - count + 1 + j
+                    if current_index < start:
+                        batch_slice.append(self._memory[start])
+                    else:
+                        batch_slice.append(self._memory[current_index])
+
+            batch.append(batch_slice)
+
+        return batch, valid_step_count, burn_in
+
+    def _add_to_memory(self, data):
+        self._memory.append(data)
+
+        if len(self._memory) > self.memory_size:
+            self._memory.pop(0)
