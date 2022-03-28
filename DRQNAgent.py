@@ -18,7 +18,7 @@ def _detach_hiddens(hiddens, starts_with_sessions):
 class DRQNAgent:
 
     def __init__(self, state_dim, action_n, q_modal, noise, gamma=1, memory_size=30000, batch_size=32,
-                 history_len: int = 4, burn_in=8, trajectory_len=12, learning_rate=1e-3, tau=1e-3, name='DRQN'):
+                 history_len=4, burn_in=8, trajectory_len=12, learning_rate=1e-3, tau=1e-3, name='DRQN'):
         self._state_dim = state_dim
         self._action_n = action_n
 
@@ -30,7 +30,7 @@ class DRQNAgent:
         self.memory_size = memory_size
         self.batch_size = batch_size
         self.history_len = history_len
-        self._inf_history_len = math.isinf(history_len)
+        self._inf_history_len = history_len == 'inf' or math.isinf(history_len)
         self.burn_in = burn_in
         self.trajectory_len = max(trajectory_len, 1)
         self.learning_rate = learning_rate
