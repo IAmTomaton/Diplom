@@ -22,15 +22,23 @@ class ThreshholdNoise:
 class DiscreteUniformNoise:
     def __init__(self, action_n, threshold=1, threshold_min=1e-2, threshold_decrease=1e-2, step_n=1):
         self.action_n = action_n
-        self.threshold = threshold
+        self._threshold = threshold
         self.start_threshold = threshold
         self.threshold_min = threshold_min
         self.threshold_decrease = threshold_decrease
         self.step_n = step_n
         self.step_i = self.step_n - 1
         self.current_action = np.random.choice(self.action_n)
+
+        self._is_turn_on = True
             
         return None
+
+    @property
+    def threshold(self):
+        if self._is_turn_on:
+            return self._threshold
+        return 0
         
     def get(self):
         if self.step_i % self.step_n == 0:
@@ -42,8 +50,14 @@ class DiscreteUniformNoise:
 
     def reduce(self):
         if self.threshold > self.threshold_min:
-            self.threshold -= self.threshold_decrease
+            self._threshold -= self.threshold_decrease
         return None
+
+    def turn_off(self):
+        self._is_turn_on = False
+
+    def turn_on(self):
+        self._is_turn_on = True
 
     def reset(self):
         return None

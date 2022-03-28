@@ -8,7 +8,7 @@ class LayerType(Enum):
     Dense = 'Dense'
 
 
-class SequentialNetwork(nn.Module):
+class SequentialNetworkWithTypes(nn.Module):
 
     def __init__(self, input_dim, layers, hidden_activation, output_activation=None):
         super().__init__()
@@ -58,7 +58,7 @@ class SequentialNetwork(nn.Module):
 
         return hid, memory
 
-    def get_initial_state(self, batch_size):
+    def get_initial_state(self, batch_size=1):
         return torch.zeros((batch_size, self._lstm_size)), torch.zeros((batch_size, self._lstm_size))
 
     def step(self, state, memory=None):

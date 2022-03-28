@@ -5,15 +5,24 @@ import numpy as np
 import torch
 
 
+def _detach_hiddens(hiddens, starts_with_sessions):
+    hidden_list = list(torch.split(hiddens[0], 1)), list(torch.split(hiddens[1], 1))
+    for i in range(len(starts_with_sessions)):
+        if not starts_with_sessions[i]:
+            hidden_list[0][i] = hidden_list[0][i].detach()
+            hidden_list[1][i] = hidden_list[1][i].detach()
+    hiddens = torch.cat(hidden_list[0]), torch.cat(hidden_list[1])
+    return hiddens
+
+
 class DRQNAgent:
 
     def __init__(self, state_dim, action_n, q_modal, noise, gamma=1, memory_size=30000, batch_size=32,
-                 history_len: int = 4, burn_in=8, trajectory_len=12, learning_rate=1e-3, tau=1e-3):
-        """
-        If inf_mem_depth is False, then we use an agent with finite memory depth, if True, then with infinite.
-        """
+                 history_len: int = 4, burn_in=8, trajectory_len=12, learning_rate=1e-3, tau=1e-3, name='DRQN'):
         self._state_dim = state_dim
         self._action_n = action_n
+
+        self.name = name
 
         self.noise = noise
 
@@ -60,19 +69,18 @@ class DRQNAgent:
         self._add_to_memory([state, action, reward, done, next_state])
 
         if len(self._memory) - self._real_history_len > self.batch_size * self.trajectory_len:
-            batch, valid_step_counts, make_burn_in = self._get_batch()
+            trajectories, starts_with_sessions = self._get_batch_trajectories()
             hiddens = self.get_initial_state(self.batch_size)
             target_hiddens = self.get_initial_state(self.batch_size)
             loss = 0
 
-            for k in range(len(batch)):
-                if k == self.burn_in:
-                    for i in range(self.batch_size):
-                        if make_burn_in[i]:
-                            hiddens[0][i].detach()
-                            hiddens[1][i].detach()
+            for k in range(len(max(trajectories, key=len))):
+                if k == self.burn_in and self._inf_history_len:
+                    # Детачим hiddens для тех траекторий для которых нужен burn_in
+                    hiddens = _detach_hiddens(hiddens, starts_with_sessions)
 
-                states, actions, rewards, danes, next_states = list(zip(*batch[k]))
+                slice_trajectories = [trajectory[k] for trajectory in trajectories]
+                states, actions, rewards, danes, next_states = list(zip(*slice_trajectories))
 
                 states = torch.FloatTensor(np.array(states))
                 q_values, hiddens = self.q_model(states, hiddens)
@@ -80,21 +88,38 @@ class DRQNAgent:
                 next_states = torch.FloatTensor(np.array(next_states))
                 next_q_values, target_hiddens = self.q_target_model(next_states, target_hiddens)
 
-                targets = q_values.clone()
-                if self._inf_history_len or (not self._inf_history_len and k == len(batch) - 1):
-                    for i in range(self.batch_size):
-                        if not self._inf_history_len or \
-                                ((not make_burn_in[i] or k >= self.burn_in) and k < valid_step_counts[i]):
-                            targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
-                    loss += torch.mean((targets.detach() - q_values) ** 2)
+                if not self._inf_history_len and k == self.history_len - 1:
+                    loss += self._calculate_loss(q_values, actions, rewards, danes, next_q_values)
 
-            if type(loss) is not int:
-                loss.backward()
-                self._optimizer.step()
-                self._optimizer.zero_grad()
+                if self._inf_history_len:
+                    if k >= self.burn_in:
+                        loss += self._calculate_loss(q_values, actions, rewards, danes, next_q_values)
+                    elif any(starts_with_sessions):
+                        # Считаем loss для траекторий начало которых совпадает с началом сессии,
+                        # а значит для них не нужен burn_in и мы можем сразу считать loss
+                        indices = [i for i, x in enumerate(starts_with_sessions) if x]
+                        q_values = torch.index_select(q_values, 0, torch.tensor(indices))
+                        next_q_values = torch.index_select(next_q_values, 0, torch.tensor(indices))
+                        loss += self._calculate_loss(q_values, actions, rewards, danes, next_q_values)
 
-                for target_param, param in zip(self.q_target_model.parameters(), self.q_model.parameters()):
-                    target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
+                    indices = [i for i in range(len(trajectories)) if len(trajectories[i]) - 1 > k]
+                    if not indices:
+                        break
+                    if len(indices) != len(trajectories):
+                        # Удаляем закончившееся траектории и всё что с ними связанно
+                        trajectories = [trajectories[i] for i in indices]
+                        starts_with_sessions = [starts_with_sessions[i] for i in indices]
+                        indices = torch.tensor(indices)
+                        hiddens = torch.index_select(hiddens[0], 0, indices), torch.index_select(hiddens[1], 0, indices)
+                        target_hiddens = torch.index_select(target_hiddens[0], 0, indices), \
+                                         torch.index_select(target_hiddens[1], 0, indices)
+
+            loss.backward()
+            self._optimizer.step()
+            self._optimizer.zero_grad()
+
+            for target_param, param in zip(self.q_target_model.parameters(), self.q_model.parameters()):
+                target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
 
     def get_initial_state(self, batch_size):
         return self.q_model.get_initial_state(batch_size)
@@ -105,6 +130,7 @@ class DRQNAgent:
     def get_hyper_parameters(self):
         return {
             'agent_parameters': {
+                'name': self.name,
                 'gamma': self.gamma,
                 'memory_size': self.memory_size,
                 'batch_size': self.batch_size,
@@ -118,52 +144,60 @@ class DRQNAgent:
             'network_parameters': self.q_model.get_hyper_parameters(),
         }
 
-    def _get_batch(self):
+    def _calculate_loss(self, q_values, actions, rewards, danes, next_q_values):
+        targets = q_values.clone()
+        for i in range(q_values.size(0)):
+            targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
+        return torch.mean((targets.detach() - q_values) ** 2)
+
+    def _get_batch_trajectories(self):
         count = self.trajectory_len if self._inf_history_len else self._real_history_len
-        batch_indexes = random.sample(range(count, len(self._memory) - count), self.batch_size)
+        centers = random.sample(range(count, len(self._memory) - count), self.batch_size)
 
+        # Находим начало траекторий
         starts = []
-        burn_in = []
-        for i in batch_indexes:
-            start = i
-            for j in range(1, count):
-                start = i - j + 1
-                if self._memory[i - j][3]:
-                    break
+        starts_with_sessions = []
+        for center in centers:
+            start = self._find_trajectory_start(center, count)
             starts.append(start)
-            burn_in.append(not self._memory[start - 1][3])
+            starts_with_sessions.append(self._memory[start - 1][3])
 
-        ends = []
-        for i in range(self.batch_size):
-            center = batch_indexes[i]
-            start = starts[i]
-            end = center
-            for j in range(count - center + start):
-                end = center + j
-                if self._memory[center + j][3]:
-                    break
-            ends.append(end)
-        valid_step_count = [ends[i] - starts[i] + 1 for i in range(self.batch_size)]
+        # Находим конец траекторий
+        ends = centers
+        if self._inf_history_len:
+            ends = [self._find_trajectory_end(centers[i], starts[i], count) for i in range(self.batch_size)]
 
+        # Собираем траектории
         batch = []
-        for j in range(count):
-            batch_slice = []
-            for i in range(self.batch_size):
-                start = starts[i]
-                center = batch_indexes[i]
+        for i in range(self.batch_size):
+            start = starts[i]
+            end = ends[i]
+            if self._inf_history_len:
+                trajectory = self._memory[start: end + 1]
+            else:
+                real_trajectory_len = end - start + 1
+                repeat_start_count = count - real_trajectory_len
+                trajectory = [self._memory[start]] * repeat_start_count + self._memory[start: end + 1]
 
-                if self._inf_history_len:
-                    batch_slice.append(self._memory[start + j])
-                else:
-                    current_index = center - count + 1 + j
-                    if current_index < start:
-                        batch_slice.append(self._memory[start])
-                    else:
-                        batch_slice.append(self._memory[current_index])
+            batch.append(trajectory)
 
-            batch.append(batch_slice)
+        return batch, starts_with_sessions
 
-        return batch, valid_step_count, burn_in
+    def _find_trajectory_start(self, center, count):
+        start = center
+        for j in range(1, count):
+            start = center - j + 1
+            if self._memory[start - 1][3]:
+                break
+        return start
+
+    def _find_trajectory_end(self, center, start, count):
+        end = center
+        for j in range(count - center + start):
+            end = center + j
+            if self._memory[end][3]:
+                break
+        return end
 
     def _add_to_memory(self, data):
         self._memory.append(data)
