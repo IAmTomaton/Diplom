@@ -40,7 +40,9 @@ def train(env, agent, epoch_n=200, episode_n=10, test_episode_n=10, log=False, l
             mean_reward = np.mean(rewards)
 
             agent.noise.turn_off()
-            test_sessions = DRQNERSolver.go(env, agent, test_episode_n, False)
+            test_sessions = []
+            DRQNERSolver.go(env, agent, test_episode_n, False,
+                            show=lambda a, b, c, session: add_session(test_sessions, session))
             agent.noise.turn_on()
 
             test_rewards = [sum(session['rewards']) for session in test_sessions]
