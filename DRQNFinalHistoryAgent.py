@@ -27,20 +27,20 @@ class DRQNFinalHistoryAgent:
         self.q_target_model = copy.deepcopy(self.q_model)
         self._optimizer = torch.optim.Adam(self.q_model.parameters(), lr=self.learning_rate)
 
-        self._hiddens = []
+        self._hiddens_stack = []
         self.reset()
 
     def get_action(self, state):
         state = torch.FloatTensor(np.array([state]))
 
-        q_values, hidden = self.q_model(state, self._hiddens[0])
+        q_values, hidden = self.q_model(state, self._hiddens_stack[0])
         action = np.argmax(q_values.data.numpy())
 
-        for i in range(1, len(self._hiddens)):
-            _, hidden = self.q_model(state, self._hiddens[i])
-            self._hiddens[i - 1] = hidden
+        for i in range(1, len(self._hiddens_stack)):
+            _, hidden = self.q_model(state, self._hiddens_stack[i])
+            self._hiddens_stack[i - 1] = hidden
 
-        self._hiddens[-1] = self.get_initial_state(1)
+        self._hiddens_stack[-1] = self.get_initial_hiddens(1)
 
         if np.random.uniform(0, 1) < self.noise.threshold:
             return self.noise.get()
@@ -51,8 +51,8 @@ class DRQNFinalHistoryAgent:
 
         if len(self._memory) > self.batch_size * self.history_len:
             trajectories, starts_with_sessions = self._get_batch_trajectories()
-            hiddens = self.get_initial_state(self.batch_size)
-            target_hiddens = self.get_initial_state(self.batch_size)
+            hiddens = self.get_initial_hiddens(self.batch_size)
+            target_hiddens = self.get_initial_hiddens(self.batch_size)
 
             for k in range(self.history_len):
                 slice_trajectories = [trajectory[k] for trajectory in trajectories]
@@ -73,11 +73,11 @@ class DRQNFinalHistoryAgent:
             for target_param, param in zip(self.q_target_model.parameters(), self.q_model.parameters()):
                 target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * param.data)
 
-    def get_initial_state(self, batch_size):
+    def get_initial_hiddens(self, batch_size):
         return self.q_model.get_initial_state(batch_size)
 
     def reset(self):
-        self._hiddens = [self.get_initial_state(1) for _ in range(self.history_len)]
+        self._hiddens_stack = [self.get_initial_hiddens(1) for _ in range(self.history_len)]
 
     def get_hyper_parameters(self):
         return {
@@ -115,12 +115,8 @@ class DRQNFinalHistoryAgent:
         # Собираем траектории
         batch = []
         for i in range(self.batch_size):
-            start = starts[i]
-            end = ends[i]
-            real_trajectory_len = end - start + 1
-            repeat_start_count = count - real_trajectory_len
-            trajectory = [self._memory[start]] * repeat_start_count + self._memory[start: end + 1]
-
+            trajectory = self._memory[starts[i]: ends[i] + 1]
+            trajectory = [self._memory[starts[i]]] * (count - len(trajectory)) + trajectory
             batch.append(trajectory)
 
         return batch, starts_with_sessions
