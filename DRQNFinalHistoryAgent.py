@@ -103,14 +103,15 @@ class DRQNFinalHistoryAgent:
         return torch.mean((targets.detach() - q_values) ** 2)
 
     def _get_batch_histories(self):
+        # Выбираем сессии в соответствии с их длинами/весами
         session_weights = [len(session) - self.history_len + 1 for session in self._session_memory]
         sessions = random.choices(self._session_memory, weights=session_weights, k=self.batch_size)
 
         batch = []
+        # Берём из каждой сессии случайною историю
         for session in sessions:
             a = random.randint(0, len(session) - self.history_len)
-            trajectory = session[a: a + self.history_len]
-            batch.append(trajectory)
+            batch.append(session[a: a + self.history_len])
 
         return batch
 
