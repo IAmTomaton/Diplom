@@ -22,7 +22,9 @@ class DRQNFinalHistoryAgent:
         self.learning_rate = learning_rate
         self.tau = tau
 
-        self._memory = []
+        self._session_memory = []
+        self._session_continues = False
+        self._fours_count = 0
         self.q_model = q_modal
         self.q_target_model = copy.deepcopy(self.q_model)
         self._optimizer = torch.optim.Adam(self.q_model.parameters(), lr=self.learning_rate)
@@ -47,16 +49,16 @@ class DRQNFinalHistoryAgent:
         return action
 
     def fit(self, state, action, reward, done, next_state):
-        self._add_to_memory([state, action, reward, done, next_state])
+        self._add_to_memory([state, action, reward, done, next_state], done)
 
-        if len(self._memory) > self.batch_size * self.history_len:
-            trajectories, starts_with_sessions = self._get_batch_trajectories()
+        if self._fours_count > self.batch_size * self.history_len:
+            histories = self._get_batch_histories()
             hiddens = self.get_initial_hiddens(self.batch_size)
             target_hiddens = self.get_initial_hiddens(self.batch_size)
 
             for k in range(self.history_len):
-                slice_trajectories = [trajectory[k] for trajectory in trajectories]
-                states, actions, rewards, danes, next_states = list(zip(*slice_trajectories))
+                slice_histories = [history[k] for history in histories]
+                states, actions, rewards, danes, next_states = list(zip(*slice_histories))
 
                 states = torch.FloatTensor(np.array(states))
                 q_values, hiddens = self.q_model(states, hiddens)
@@ -100,36 +102,30 @@ class DRQNFinalHistoryAgent:
             targets[i][actions[i]] = rewards[i] + self.gamma * (1 - danes[i]) * max(next_q_values[i])
         return torch.mean((targets.detach() - q_values) ** 2)
 
-    def _get_batch_trajectories(self):
-        count = self.history_len
-        ends = random.sample(range(count, len(self._memory) - count), self.batch_size)
+    def _get_batch_histories(self):
+        session_weights = [len(session) - self.history_len + 1 for session in self._session_memory]
+        sessions = random.choices(self._session_memory, weights=session_weights, k=self.batch_size)
 
-        # Находим начало траекторий
-        starts = []
-        starts_with_sessions = []
-        for center in ends:
-            start = self._find_trajectory_start(center, count)
-            starts.append(start)
-            starts_with_sessions.append(self._memory[start - 1][3])
-
-        # Собираем траектории
         batch = []
-        for i in range(self.batch_size):
-            trajectory = self._memory[starts[i]: ends[i] + 1]
-            trajectory = [self._memory[starts[i]]] * (count - len(trajectory)) + trajectory
+        for session in sessions:
+            a = random.randint(0, len(session) - self.history_len)
+            trajectory = session[a: a + self.history_len]
             batch.append(trajectory)
 
-        return batch, starts_with_sessions
+        return batch
 
-    def _find_trajectory_start(self, center, count):
-        for j in range(1, count):
-            start = center - j + 1
-            if self._memory[start - 1][3]:
-                return start
-        return center - count + 1
+    def _add_to_memory(self, data, done):
+        if self._session_continues:
+            self._session_memory[-1].append(data)
+        else:
+            self._session_memory.append([data] * self.history_len)
+        self._fours_count += 1
 
-    def _add_to_memory(self, data):
-        self._memory.append(data)
+        self._session_continues = not done
 
-        if len(self._memory) > self.memory_size:
-            self._memory.pop(0)
+        if self._fours_count > self.memory_size:
+            if len(self._session_memory[0]) <= self.history_len:
+                self._session_memory.pop(0)
+            else:
+                self._session_memory[0].pop(0)
+            self._fours_count -= 1
