@@ -130,3 +130,25 @@ class DRQNFinalHistoryAgent:
             else:
                 self._session_memory[0].pop(0)
             self._fours_count -= 1
+
+
+class ArrayWithI(list):
+    """class of float number with inner attribute i"""
+    def __init__(self, v):
+        super().__init__(v)
+        self.i = None
+
+
+class ContinuousDRQNFinalHistoryAgent(DRQNFinalHistoryAgent):
+    def __init__(self, *args, action_values, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.action_values = action_values
+
+    def get_action(self, state):
+        action_i = super().get_action(state)
+        action = ArrayWithI(self.action_values[action_i])
+        action.i = action_i
+        return action
+
+    def fit(self, state, action, reward, done, next_state):
+        super().fit(state, action.i, reward, done, next_state)
